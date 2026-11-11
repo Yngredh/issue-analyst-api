@@ -12,18 +12,18 @@ Requisitos atendidos: RF01 a RF07, entrada do RF28 (`issues.edited`), RNF01, RNF
 
 **Branch.** `feature/entrada-de-issues`. Uma etapa por commit, com a mensagem `etapa N - <título da etapa>`.
 
-**Referências** (fonte da verdade; em caso de divergência, ver "Pontos em aberto"):
-- Entrada de issues (issue-analyst-api) | Spec Geral — `docs/referencias/entrada-de-issues.md`
-- Modelagem de dados — `docs/referencias/modelagem-de-dados.md` (schema `inbound`)
-- Requisitos — `docs/referencias/requisitos.md`
-- High Level Design — `docs/referencias/high-level-design.md` (seções 3.2 Filas e 5 Tecnologias)
+**Referências** (fonte da verdade; em caso de divergência, ver "Pontos em aberto"). Não existe `docs/referencias/` neste repositório: a fonte da verdade é `../docs/doc-reference.md` (pasta `docs/` da raiz do projeto), que aponta para as páginas web de cada documento (registrado em 2026-11-10):
+- Entrada de issues (issue-analyst-api) | Spec Geral — https://claude.ai/artifact/KpLq1aug1K7yFwaSfKQcvf (indicada pelo usuário; o `doc-reference.md` lista esse link como "Issue Publisher Spec" e aponta a "Ingestão Spec" para https://claude.ai/artifact/C35MqLEDZ2k8wacbDpwde2)
+- Modelagem de dados (schema `inbound`) — link no `doc-reference.md`
+- Requisitos — link no `doc-reference.md`
+- High Level Design (seções 3.2 Filas e 5 Tecnologias) — link no `doc-reference.md`
 - Lista de features — `docs/features-issue-analyst-api.md`
 
 As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa precisa, para que o agente não dependa de ler os documentos inteiros.
 
 **Pré-requisitos (manuais, antes da Etapa 1)**
 - [ ] Commitar na `main` o esqueleto gerado pelo `uv init` (pyproject, `src/`, `tests/`, `.env.example`, `.gitignore`, README) e este plano.
-- [ ] Exportar os documentos de referência para `docs/referencias/` com os nomes acima.
+- [ ] Exportar os documentos de referência para `docs/referencias/` com os nomes acima. (Ainda não feito; até lá vale o `../docs/doc-reference.md`, ver "Referências".)
 - [ ] Validar as "Decisões técnicas da implementação" e os "Pontos em aberto" que bloqueiam etapas (indicados em cada etapa).
 
 ## Como executar com agentes
@@ -40,7 +40,7 @@ As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa
 
 ## Decisões técnicas da implementação
 
-Escolhas de implementação que os documentos não fecham. **Status: propostas, validar antes da Etapa 1.**
+Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D6 a D11 continuam propostas e devem ser validadas antes das etapas que dependem delas.**
 
 | # | Ponto | Escolha proposta |
 |---|---|---|
@@ -140,14 +140,14 @@ CREATE INDEX inbound_outbox_pending ON inbound.inbound_outbox (id) WHERE publish
 
 ### Etapa 1 — Fundação do serviço HTTP
 Requisitos: RNF14, RNF18. Depende de: pré-requisitos. Pré-condição: decisões D1 a D5 validadas.
-- [ ] Adicionar dependências com `uv add`: `fastapi`, `uvicorn[standard]`, `psycopg[binary,pool]`, `aio-pika`; e com `uv add --dev`: `testcontainers[postgres,rabbitmq]`, `httpx`.
-- [ ] Completar `Settings` com as variáveis de "Contratos > Variáveis de ambiente" (`GITHUB_WEBHOOK_SECRET` como `SecretStr` obrigatório; limites com os padrões 256 e 500) e ajustar os testes existentes de `Settings`.
-- [ ] Criar a fábrica `create_app()` em `api/` com `GET /health` e um lifespan vazio, pronto para abrir o pool do banco e o relay nas próximas etapas.
-- [ ] Fazer `main.py` subir o uvicorn com `create_app()` na porta `HTTP_PORT`.
-- [ ] Atualizar o `.env.example` (só nomes) e criar `docker-compose.yml` local com PostgreSQL e RabbitMQ para desenvolvimento.
-- [ ] Criar `Dockerfile` do serviço baseado em uv.
-- [ ] Testes: `/health` responde 200 sem banco nem broker; `Settings` falha sem `GITHUB_WEBHOOK_SECRET`.
-- [ ] Atualizar o README com como subir o compose e iniciar o serviço.
+- [x] Adicionar dependências com `uv add`: `fastapi`, `uvicorn[standard]`, `psycopg[binary,pool]`, `aio-pika`; e com `uv add --dev`: `testcontainers[postgres,rabbitmq]`, `httpx`.
+- [x] Completar `Settings` com as variáveis de "Contratos > Variáveis de ambiente" (`GITHUB_WEBHOOK_SECRET` como `SecretStr` obrigatório; limites com os padrões 256 e 500) e ajustar os testes existentes de `Settings`.
+- [x] Criar a fábrica `create_app()` em `api/` com `GET /health` e um lifespan vazio, pronto para abrir o pool do banco e o relay nas próximas etapas.
+- [x] Fazer `main.py` subir o uvicorn com `create_app()` na porta `HTTP_PORT`.
+- [x] Atualizar o `.env.example` (só nomes) e criar `docker-compose.yml` local com PostgreSQL e RabbitMQ para desenvolvimento.
+- [x] Criar `Dockerfile` do serviço baseado em uv.
+- [x] Testes: `/health` responde 200 sem banco nem broker; `Settings` falha sem `GITHUB_WEBHOOK_SECRET`.
+- [x] Atualizar o README com como subir o compose e iniciar o serviço.
 
 ### Etapa 2 — Schema inbound e migrações
 Requisitos: RNF07. Depende de: Etapa 1.
