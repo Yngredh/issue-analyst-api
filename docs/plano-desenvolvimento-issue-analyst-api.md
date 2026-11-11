@@ -164,11 +164,11 @@ Requisitos: RNF07. Depende de: Etapa 1.
 
 ### Etapa 3 — Webhook, limite de tamanho e assinatura HMAC
 Requisitos: RF01, RF02. Depende de: Etapa 1.
-- [ ] Criar `POST /webhooks/github` lendo o corpo bruto em streaming e recusando acima de 1 MB com `413 payload_too_large`, antes de conferir a assinatura.
-- [ ] Conferir o HMAC SHA-256 do corpo bruto contra `X-Hub-Signature-256` com `hmac.compare_digest`; ausente, malformado ou divergente → `401` sem corpo.
-- [ ] Interpretar o JSON só depois da assinatura válida; JSON inválido → `400 invalid_payload`.
-- [ ] Até a Etapa 5, uma requisição que passa por tudo isso responde `501` (provisório, substituído na Etapa 5).
-- [ ] Testes unitários do verificador de assinatura e testes do endpoint pelo cliente de teste do FastAPI: válida, ausente, errada, malformada, corpo acima do limite com assinatura inválida (413) e JSON inválido; o segredo não aparece em nenhum log.
+- [x] Criar `POST /webhooks/github` lendo o corpo bruto em streaming e recusando acima de 1 MB com `413 payload_too_large`, antes de conferir a assinatura.
+- [x] Conferir o HMAC SHA-256 do corpo bruto contra `X-Hub-Signature-256` com `hmac.compare_digest`; ausente, malformado ou divergente → `401` sem corpo.
+- [x] Interpretar o JSON só depois da assinatura válida; JSON inválido → `400 invalid_payload`.
+- [x] Até a Etapa 5, uma requisição que passa por tudo isso responde `501` (provisório, substituído na Etapa 5).
+- [x] Testes unitários do verificador de assinatura e testes do endpoint pelo cliente de teste do FastAPI: válida, ausente, errada, malformada, corpo acima do limite com assinatura inválida (413) e JSON inválido; o segredo não aparece em nenhum log.
 
 ### Etapa 4 — Filtro de eventos e normalização
 Requisitos: RF02, RF03, RF04, RF05, RF28 (entrada). Depende de: Etapa 3. Pré-condição: decisões D7 e D8 validadas.

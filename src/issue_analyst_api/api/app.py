@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from issue_analyst_api.adapters.database import close_pool, create_pool, open_pool
+from issue_analyst_api.api import webhooks
 from issue_analyst_api.config import Settings
 
 
@@ -31,5 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         """Responde se o processo está de pé, sem tocar banco nem broker."""
         return {"status": "ok"}
+
+    app.include_router(webhooks.router)
 
     return app
