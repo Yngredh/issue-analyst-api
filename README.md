@@ -11,7 +11,7 @@ Recebe issues do GitHub, valida e encaminha para o processo de triagem.
 
 Copie `.env.example` para `.env` e preencha os valores. São obrigatórios `DATABASE_URL`,
 `RABBITMQ_URL` e `GITHUB_WEBHOOK_SECRET`; os demais têm padrão (`HTTP_PORT=8000`,
-`MAX_TITLE_CHARS=256`, `MAX_DESCRIPTION_CHARS=500`, `RELAY_POLL_INTERVAL_S=1`,
+`WEBHOOK_MAX_BODY_BYTES=1048576`, `MAX_TITLE_CHARS=256`, `MAX_DESCRIPTION_CHARS=500`, `RELAY_POLL_INTERVAL_S=1`,
 `RELAY_BATCH_SIZE=100`). Para o compose local, as URLs são:
 
 ```

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     RABBITMQ_URL: str
     GITHUB_WEBHOOK_SECRET: SecretStr
+    WEBHOOK_MAX_BODY_BYTES: int = 1_048_576
     MAX_TITLE_CHARS: int = 256
     MAX_DESCRIPTION_CHARS: int = 500
     RELAY_POLL_INTERVAL_S: float = 1

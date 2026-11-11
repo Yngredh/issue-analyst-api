@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import logging
 from collections.abc import Iterator
 
@@ -10,32 +11,50 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from issue_analyst_api.api.app import create_app
-from issue_analyst_api.api.webhooks import MAX_BODY_BYTES
 from issue_analyst_api.config import Settings
 
 SECRET = "endpoint-test-secret-value"
 URL = "/webhooks/github"
-VALID_BODY = b'{"action": "opened", "issue": {"number": 1}}'
+MAX_BODY_BYTES = 1_048_576  # padrão de WEBHOOK_MAX_BODY_BYTES
+VALID_BODY = json.dumps(
+    {
+        "action": "opened",
+        "issue": {
+            "number": 1,
+            "title": "Erro ao salvar",
+            "body": "Passos para reproduzir",
+            "created_at": "2026-11-10T12:00:00Z",
+            "updated_at": "2026-11-10T12:00:00Z",
+        },
+        "repository": {"full_name": "acme/app"},
+        "sender": {"type": "User"},
+    }
+).encode()
+ISSUE_HEADERS = {"X-GitHub-Event": "issues", "X-GitHub-Delivery": "evt-001"}
 
 
 def _sign(body: bytes, secret: str = SECRET) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-@pytest.fixture
-def client() -> Iterator[TestClient]:
+def _settings(**overrides: object) -> Settings:
     # Banco e broker em portas fechadas: estas verificações não podem depender deles.
-    settings = Settings(
+    return Settings(
         GITHUB_WEBHOOK_SECRET=SecretStr(SECRET),
         DATABASE_URL="postgresql://nobody:nothing@127.0.0.1:1/none",
         RABBITMQ_URL="amqp://nobody:nothing@127.0.0.1:1/",
+        **overrides,
     )
-    with TestClient(create_app(settings)) as test_client:
+
+
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    with TestClient(create_app(_settings())) as test_client:
         yield test_client
 
 
 def _post(client: TestClient, body: bytes, signature: str | None) -> httpx.Response:
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", **ISSUE_HEADERS}
     if signature is not None:
         headers["X-Hub-Signature-256"] = signature
     return client.post(URL, content=body, headers=headers)

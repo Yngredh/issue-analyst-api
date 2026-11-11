@@ -10,6 +10,7 @@ ENV_VARS = (
     "DATABASE_URL",
     "RABBITMQ_URL",
     "GITHUB_WEBHOOK_SECRET",
+    "WEBHOOK_MAX_BODY_BYTES",
     "MAX_TITLE_CHARS",
     "MAX_DESCRIPTION_CHARS",
     "RELAY_POLL_INTERVAL_S",
@@ -35,6 +36,7 @@ def test_settings_load_with_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.LOG_LEVEL == "INFO"
     assert settings.SERVICE_NAME == "issue-analyst-api"
+    assert settings.WEBHOOK_MAX_BODY_BYTES == 1_048_576
     assert settings.MAX_TITLE_CHARS == 256
     assert settings.MAX_DESCRIPTION_CHARS == 500
     assert settings.RELAY_POLL_INTERVAL_S == 1
@@ -46,12 +48,14 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("HTTP_PORT", "9000")
     monkeypatch.setenv("MAX_DESCRIPTION_CHARS", "800")
+    monkeypatch.setenv("WEBHOOK_MAX_BODY_BYTES", "2048")
 
     settings = Settings()
 
     assert settings.LOG_LEVEL == "DEBUG"
     assert settings.HTTP_PORT == 9000
     assert settings.MAX_DESCRIPTION_CHARS == 800
+    assert settings.WEBHOOK_MAX_BODY_BYTES == 2048
 
 
 def test_settings_fail_without_webhook_secret() -> None:
