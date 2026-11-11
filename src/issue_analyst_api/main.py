@@ -1,3 +1,6 @@
+import asyncio
+import sys
+
 import structlog
 import uvicorn
 
@@ -12,12 +15,18 @@ def main() -> None:
     structlog.get_logger().info(
         "service starting", log_level=settings.LOG_LEVEL, http_port=settings.HTTP_PORT
     )
-    uvicorn.run(
+    config = uvicorn.Config(
         create_app(settings),
         host="0.0.0.0",
         port=settings.HTTP_PORT,
         log_level=settings.LOG_LEVEL.lower(),
     )
+    server = uvicorn.Server(config)
+    if sys.platform == "win32":
+        # O psycopg assíncrono não funciona com o ProactorEventLoop, padrão no Windows.
+        asyncio.run(server.serve(), loop_factory=asyncio.SelectorEventLoop)
+    else:
+        server.run()
 
 
 if __name__ == "__main__":

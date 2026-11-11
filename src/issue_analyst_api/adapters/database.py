@@ -2,10 +2,14 @@
 
 from psycopg_pool import AsyncConnectionPool
 
+# Espera máxima por uma conexão do pool antes de responder `503 unavailable`. Fica abaixo do
+# tempo limite de entrega do webhook do GitHub (10 s).
+CONNECTION_TIMEOUT_S = 5.0
+
 
 def create_pool(database_url: str) -> AsyncConnectionPool:
     """Cria o pool sem abri-lo; quem abre e fecha é o lifespan da aplicação."""
-    return AsyncConnectionPool(conninfo=database_url, open=False)
+    return AsyncConnectionPool(conninfo=database_url, open=False, timeout=CONNECTION_TIMEOUT_S)
 
 
 async def open_pool(pool: AsyncConnectionPool) -> None:

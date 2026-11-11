@@ -22,7 +22,7 @@ Requisitos atendidos: RF01 a RF07, entrada do RF28 (`issues.edited`), RNF01, RNF
 As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa precisa, para que o agente não dependa de ler os documentos inteiros.
 
 **Pré-requisitos (manuais, antes da Etapa 1)**
-- [ ] Commitar na `main` o esqueleto gerado pelo `uv init` (pyproject, `src/`, `tests/`, `.env.example`, `.gitignore`, README) e este plano.
+- [x] Commitar na `main` o esqueleto gerado pelo `uv init` (pyproject, `src/`, `tests/`, `.env.example`, `.gitignore`, README) e este plano. (feito em `d1ac992`, mergeado na `main` em `0d71ca8`)
 - [ ] Validar as "Decisões técnicas da implementação" e os "Pontos em aberto" que bloqueiam etapas (indicados em cada etapa).
 
 ## Como executar com agentes
@@ -39,7 +39,7 @@ As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa
 
 ## Decisões técnicas da implementação
 
-Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6, D9 e D10 continuam propostas e devem ser validadas antes das etapas que dependem delas.**
+Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6 e D10 validadas pelo usuário em 2026-11-10 como estão; D9 alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec. Regra geral do usuário: em caso de dúvida ou divergência, prevalece o que está definido na Ingestão Spec.**
 
 | # | Ponto | Escolha proposta |
 |---|---|---|
@@ -51,7 +51,7 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 | D6 | Parâmetros do relay | `RELAY_POLL_INTERVAL_S = 1`, `RELAY_BATCH_SIZE = 100`, backoff de reconexão ao broker de 1 s a 30 s |
 | D7 | Motivos de `ignored` | `ping`, `unsupported_event`, `unsupported_action`, `bot_sender` |
 | D8 | Corpo dos erros 400 | `{"error": "<código>", "fields": ["<campo>", ...]}`; precedência: `invalid_payload` > `missing_event_id` > `missing_fields` > `invalid_fields` |
-| D9 | Link de consulta no 202 | campo `statusUrl` com `/issues/{owner}/{repo}/{number}` |
+| D9 | Link de consulta no 202 | **Alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec:** objeto `links` com `result` = `/issues/{owner}/{repo}/{number}`, em vez do campo `statusUrl`. Exemplo da spec: `{"status": "accepted", "eventId": "evt-001", "links": {"result": "/issues/equipe/projeto-teste/42"}}` |
 | D10 | "Estado atual" no `duplicate` | `status` lido de `inbound.issue_events` (sempre `ACCEPTED` nesta entrega); a combinação com triage e publisher fica para a spec da consulta |
 | D11 | Limite do corpo | **Alterada pelo usuário em 2026-11-10:** configurável pela variável `WEBHOOK_MAX_BODY_BYTES` (int, padrão 1.048.576 bytes = 1 MB), em vez de constante no código |
 | D12 | Detalhes da normalização e validação (Etapa 4), **validada pelo usuário em 2026-11-10** | 1) `occurredAt` ausente, não string, fora de ISO 8601 ou sem fuso (não se assume UTC) **não recusa o evento**: o normalizado sai com `occurredAt = null` e `occurredAtFallback` = `missing` ou `invalid`, é registrado o log de warning `occurred_at_fallback` com o motivo, e a Etapa 5 grava em `occurred_at` o mesmo instante de `received_at` (a coluna continua NOT NULL); `occurredAt` nunca entra em `missing_fields` nem em `invalid_fields`. 2) `missing_event_id` responde `"fields": ["eventId"]`; só `invalid_payload` usa a lista vazia. 3) JSON válido que não é objeto → `400 invalid_payload` com `"fields": []`, antes do filtro. 4) Motivos de `ignored` avaliados na ordem da D7 (`ping` > `unsupported_event` > `unsupported_action` > `bot_sender`), e o filtro roda antes da exigência de `X-GitHub-Delivery`: um `ping` sem `X-GitHub-Delivery` responde `200 ignored`. 5) Descrição só com espaços é gravada como `""`; não string ou acima do limite → `invalid_fields`; os limites contam caracteres, não bytes. 6) `repository` no formato `owner/name` (uma barra, partes não vazias e sem espaços; ausente/`null` → `missing_fields`, vazio ou não string → `invalid_fields`); `issueNumber` aceito só com `type(v) is int` e ≥ 1 (`true`, `7.0`, `"7"` → `invalid_fields`); limites inclusivos (`<=`); ordem dos campos no erro: repository, issueNumber, title, description |
@@ -61,6 +61,12 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 - `HTTP_PORT` tem padrão 8000, com bind em `0.0.0.0`.
 - Credenciais locais do compose: PostgreSQL `postgres`/`postgres` com o banco `issue_analyst`; RabbitMQ `guest`/`guest`.
 - `RELAY_POLL_INTERVAL_S` é `float`.
+
+**Decisão do usuário em 2026-11-10 (aplicada na Etapa 5):**
+- Windows: `main.py`, só quando `sys.platform == "win32"`, roda o servidor com `asyncio.run(server.serve(), loop_factory=asyncio.SelectorEventLoop)` (Python 3.12), porque o psycopg assíncrono não funciona com o loop Proactor. Docker/Linux não muda (`server.run()`).
+
+**Escolha de implementação da Etapa 5 (proposta, aguarda validação):**
+- Espera máxima por conexão do pool do banco: `CONNECTION_TIMEOUT_S = 5` s (constante em `adapters/database.py`); passado esse tempo sem conexão, o webhook responde `503 unavailable`. Escolhido abaixo do tempo limite de entrega do webhook do GitHub (10 s); o padrão do psycopg (30 s) passaria desse limite.
 
 ## Contratos
 
@@ -115,7 +121,7 @@ Exemplo de corpo de erro na spec:
 ### Respostas
 | Código | Corpo | Quando |
 |---|---|---|
-| 202 | `{"status": "accepted", "eventId", "statusUrl"}` | evento novo gravado (resposta só depois do commit) |
+| 202 | `{"status": "accepted", "eventId", "links": {"result": "/issues/{owner}/{repo}/{number}"}}` (D9) | evento novo gravado (resposta só depois do commit, sem esperar fila, IA ou GitHub; 202 significa "aceito e guardado", não "analisado") |
 | 200 | `{"status": "duplicate", "reason": "duplicate_event" \| "duplicate_issue", "eventId", "state"}` | `eventId` ou issue já recebidos |
 | 200 | `{"status": "ignored", "reason"}` | ping, outro evento, outra ação ou bot |
 | 400 | `{"error": "invalid_payload" \| "missing_event_id" \| "missing_fields" \| "invalid_fields", "fields": [...]}` | JSON inválido ou campos com problema; `missing_fields` lista todos os faltantes |
@@ -211,12 +217,13 @@ Requisitos: RF02, RF03, RF04, RF05, RF28 (entrada). Depende de: Etapa 3. Pré-co
 
 ### Etapa 5 — Persistência transacional com outbox
 Requisitos: RF07, RNF05, RNF07. Depende de: Etapas 2 e 4. Pré-condição: decisão D9 validada.
-- [ ] Repositório em `adapters/` que, numa única transação, faz `INSERT ... ON CONFLICT DO NOTHING` (sem alvo) em `inbound.issue_events` (com `occurred_at = received_at` quando o normalizado vier com `occurredAtFallback`, D12) e, só se a linha foi inserida, grava em `inbound.inbound_outbox` a mensagem de "Contratos > Mensagem da fila `analysis`" (`dedup_key = '<eventId>:1'`), com `body_hash` = SHA-256 do corpo bruto.
-- [ ] `issue.created` aceito → `202 accepted` com `eventId` e `statusUrl`, só depois do commit.
-- [ ] Sem linha inserida: encerrar sem gravar outbox e responder `200 duplicate` só com `eventId` (o motivo e o estado são completados na Etapa 6).
-- [ ] `issue.edited` válido continua respondendo `501` até a Etapa 9.
-- [ ] Banco indisponível → `503 unavailable` e nada gravado.
-- [ ] Testes de integração: 202 grava exatamente uma linha em cada tabela; falha no insert da outbox não deixa evento gravado (atomicidade); banco parado → 503; `raw_payload` guardado sem alteração.
+- [x] Repositório em `adapters/` que, numa única transação, faz `INSERT ... ON CONFLICT DO NOTHING` (sem alvo) em `inbound.issue_events` (com `occurred_at = received_at` quando o normalizado vier com `occurredAtFallback`, D12) e, só se a linha foi inserida, grava em `inbound.inbound_outbox` a mensagem de "Contratos > Mensagem da fila `analysis`" (`dedup_key = '<eventId>:1'`), com `body_hash` = SHA-256 do corpo bruto.
+- [x] `issue.created` aceito → `202 accepted` com `eventId` e `links.result` (D9), só depois do commit.
+- [x] Sem linha inserida: encerrar sem gravar outbox e responder `200 duplicate` só com `eventId` (o motivo e o estado são completados na Etapa 6).
+- [x] `issue.edited` válido continua respondendo `501` até a Etapa 9.
+- [x] Banco indisponível → `503 unavailable` e nada gravado.
+- [x] Testes de integração: 202 grava exatamente uma linha em cada tabela; falha no insert da outbox não deixa evento gravado (atomicidade); banco parado → 503; `raw_payload` guardado sem alteração.
+- [x] Windows: `main.py` sobe o uvicorn com `SelectorEventLoop` (decisão do usuário de 2026-11-10).
 
 ### Etapa 6 — Deduplicação
 Requisitos: RF06. Depende de: Etapa 5. Pré-condição: decisão D10 validada.
@@ -263,8 +270,13 @@ Divergências entre documentos e lacunas que bloqueiam etapas. Cada decisão tom
 | P1 | Mensagem de `issue.edited` | A Entrada de issues diz que o evento é enfileirado e o `issue-triage` decide se a edição importa. O High Level Design (seção 3.2) e a Modelagem de dados dizem que o `issue-analyst-api` produz `attempt + 1` só em `READY_TO_PUBLISH` com `empty_description`, com o `origin_event_id` do caso em `eventId` e o delivery id da edição em `triggerRef`. Falta decidir quem filtra e o formato do payload | Etapa 9 |
 | P2 | Nomes das tabelas | A Entrada de issues usa `ingested_events`, `outbox` e o índice `ingested_events_one_created_per_issue`; a Modelagem de dados usa `inbound.issue_events`, `inbound.inbound_outbox` e `issue_events_one_created_per_issue`. Este plano segue a Modelagem de dados, que é a referência das colunas | — (corrigir a Entrada de issues) |
 | P3 | Coluna `missing_description` | Citada na Entrada de issues e ausente no DDL da Modelagem de dados. Este plano deriva `missingDescription` de `description = ''`, sem coluna | — (corrigir a Entrada de issues) |
-| P4 | Argumentos da fila `analysis` | O High Level Design prevê DLQ para `analysis`, e a definição dela está pendente na spec de IA. Como a declaração precisa ter os mesmos argumentos em quem declara e em quem consome, falta decidir os argumentos e qual serviço declara a topologia | Etapa 7 |
 | P5 | Papéis e permissões do banco | O `GRANT` e o papel `analyst_api` da Modelagem de dados atravessam serviços; falta decidir onde ficam (script de inicialização do ambiente integrado) e onde mora o compose que sobe os três serviços | Não bloqueia: este plano usa o compose local e `DATABASE_URL` |
+
+### Pontos decididos
+
+| # | Ponto | Decisão | Etapa |
+|---|---|---|---|
+| P4 | Argumentos da fila `analysis` | **Decidido pelo usuário em 2026-11-10:** o `issue-analyst-api` declara `analysis` só como durável, sem nenhum argumento `x-*`, e o `issue-triage` declara a fila igual. A DLQ (`analysis.dlx`/`analysis.dlq`) fica por policy do RabbitMQ, a cargo da spec de IA e da inicialização do ambiente integrado (P5). Situação original: o High Level Design prevê DLQ para `analysis`, e a definição dela está pendente na spec de IA; a declaração precisa ter os mesmos argumentos em quem declara e em quem consome | Etapa 7 |
 
 ## Fora do escopo
 
