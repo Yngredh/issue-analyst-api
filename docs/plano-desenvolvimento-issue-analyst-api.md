@@ -13,7 +13,7 @@ Requisitos atendidos: RF01 a RF07, entrada do RF28 (`issues.edited`), RNF01, RNF
 **Branch.** `feature/entrada-de-issues`. Uma etapa por commit, com a mensagem `etapa N - <título da etapa>`.
 
 **Referências** (fonte da verdade; em caso de divergência, ver "Pontos em aberto"). Não existe `docs/referencias/` neste repositório: a fonte da verdade é `../docs/doc-reference.md` (pasta `docs/` da raiz do projeto), que aponta para as páginas web de cada documento (registrado em 2026-11-10):
-- Entrada de issues (issue-analyst-api) | Spec Geral — https://claude.ai/artifact/KpLq1aug1K7yFwaSfKQcvf (indicada pelo usuário; o `doc-reference.md` lista esse link como "Issue Publisher Spec" e aponta a "Ingestão Spec" para https://claude.ai/artifact/C35MqLEDZ2k8wacbDpwde2)
+- Entrada de issues (issue-analyst-api) | Spec Geral — "Ingestão Spec" do `doc-reference.md`: https://claude.ai/artifact/C35MqLEDZ2k8wacbDpwde2 (confirmado pelo usuário em 2026-11-10; o link KpLq1aug1K7yFwaSfKQcvf é da Issue Publisher Spec e não se aplica a este serviço)
 - Modelagem de dados (schema `inbound`) — link no `doc-reference.md`
 - Requisitos — link no `doc-reference.md`
 - High Level Design (seções 3.2 Filas e 5 Tecnologias) — link no `doc-reference.md`
@@ -23,7 +23,6 @@ As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa
 
 **Pré-requisitos (manuais, antes da Etapa 1)**
 - [ ] Commitar na `main` o esqueleto gerado pelo `uv init` (pyproject, `src/`, `tests/`, `.env.example`, `.gitignore`, README) e este plano.
-- [ ] Exportar os documentos de referência para `docs/referencias/` com os nomes acima. (Ainda não feito; até lá vale o `../docs/doc-reference.md`, ver "Referências".)
 - [ ] Validar as "Decisões técnicas da implementação" e os "Pontos em aberto" que bloqueiam etapas (indicados em cada etapa).
 
 ## Como executar com agentes
@@ -55,6 +54,12 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 | D9 | Link de consulta no 202 | campo `statusUrl` com `/issues/{owner}/{repo}/{number}` |
 | D10 | "Estado atual" no `duplicate` | `status` lido de `inbound.issue_events` (sempre `ACCEPTED` nesta entrega); a combinação com triage e publisher fica para a spec da consulta |
 | D11 | Limite do corpo | constante de 1 MB (1.048.576 bytes) no código; só título e descrição são configuráveis |
+
+**Decisões aprovadas pelo usuário em 2026-11-10 (tomadas na Etapa 1):**
+- `DATABASE_URL` e `RABBITMQ_URL` são obrigatórias, sem valor padrão.
+- `HTTP_PORT` tem padrão 8000, com bind em `0.0.0.0`.
+- Credenciais locais do compose: PostgreSQL `postgres`/`postgres` com o banco `issue_analyst`; RabbitMQ `guest`/`guest`.
+- `RELAY_POLL_INTERVAL_S` é `float`.
 
 ## Contratos
 
@@ -151,11 +156,11 @@ Requisitos: RNF14, RNF18. Depende de: pré-requisitos. Pré-condição: decisõe
 
 ### Etapa 2 — Schema inbound e migrações
 Requisitos: RNF07. Depende de: Etapa 1.
-- [ ] Criar `migrations/0001_inbound_schema.sql` com o DDL da seção "Modelo de dados".
-- [ ] Criar o runner `python -m issue_analyst_api.migrate` (decisão D2), idempotente: rodar duas vezes não falha nem duplica.
-- [ ] Criar o adaptador de conexão em `adapters/` (pool assíncrono do psycopg) e abrir e fechar o pool no lifespan.
-- [ ] Criar fixtures compartilhadas em `tests/conftest.py`: PostgreSQL do testcontainers por sessão, com as migrações aplicadas.
-- [ ] Testes de integração: tabelas e índices criados; o índice parcial barra um segundo `issue.created` da mesma issue e aceita `issue.edited`; o `CHECK` recusa título só com espaços; o runner é idempotente.
+- [x] Criar `migrations/0001_inbound_schema.sql` com o DDL da seção "Modelo de dados".
+- [x] Criar o runner `python -m issue_analyst_api.migrate` (decisão D2), idempotente: rodar duas vezes não falha nem duplica.
+- [x] Criar o adaptador de conexão em `adapters/` (pool assíncrono do psycopg) e abrir e fechar o pool no lifespan.
+- [x] Criar fixtures compartilhadas em `tests/conftest.py`: PostgreSQL do testcontainers por sessão, com as migrações aplicadas.
+- [x] Testes de integração: tabelas e índices criados; o índice parcial barra um segundo `issue.created` da mesma issue e aceita `issue.edited`; o `CHECK` recusa título só com espaços; o runner é idempotente.
 
 ### Etapa 3 — Webhook, limite de tamanho e assinatura HMAC
 Requisitos: RF01, RF02. Depende de: Etapa 1.

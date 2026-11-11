@@ -3,20 +3,27 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from issue_analyst_api.adapters.database import close_pool, create_pool, open_pool
 from issue_analyst_api.config import Settings
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Cria a aplicação HTTP do serviço.
 
-    O lifespan ainda é vazio; as próximas etapas abrem nele o pool do banco e o relay.
+    O lifespan abre o pool do banco na subida e o fecha no encerramento.
     """
     app_settings = settings if settings is not None else Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = app_settings
-        yield
+        pool = create_pool(app_settings.DATABASE_URL)
+        await open_pool(pool)
+        app.state.db_pool = pool
+        try:
+            yield
+        finally:
+            await close_pool(pool)
 
     app = FastAPI(title=app_settings.SERVICE_NAME, lifespan=lifespan)
 
