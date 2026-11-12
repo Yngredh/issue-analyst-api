@@ -84,14 +84,20 @@ async def receive_github_webhook(request: Request) -> Response:
         return Response(status_code=501)  # provisório até a Etapa 9
 
     try:
-        inserted = await store_issue_created(request.app.state.db_pool, result, payload, body)
+        duplicate = await store_issue_created(request.app.state.db_pool, result, payload, body)
     except DatabaseUnavailableError:
         return JSONResponse(status_code=503, content={"error": "unavailable"})
 
-    if not inserted:
-        # Motivo e estado do `duplicate` são completados na Etapa 6.
+    if duplicate is not None:
+        # `eventId` é o da entrega recebida; `state` vem da linha já gravada (D13).
         return JSONResponse(
-            status_code=200, content={"status": "duplicate", "eventId": result.event_id}
+            status_code=200,
+            content={
+                "status": "duplicate",
+                "reason": duplicate.reason.value,
+                "eventId": result.event_id,
+                "state": duplicate.state,
+            },
         )
 
     # Resposta só depois do commit: 202 significa "aceito e guardado", não "analisado".

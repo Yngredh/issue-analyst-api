@@ -182,7 +182,12 @@ def test_same_event_id_again_returns_duplicate_without_new_outbox_row(
     response = _post(client, body, event_id)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "duplicate", "eventId": event_id}
+    assert response.json() == {
+        "status": "duplicate",
+        "reason": "duplicate_event",
+        "eventId": event_id,
+        "state": "ACCEPTED",
+    }
     with psycopg.connect(database_url) as conn:
         assert len(_event_rows(conn, event_id)) == 1
         assert len(_outbox_rows(conn, event_id)) == 1

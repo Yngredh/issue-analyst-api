@@ -234,9 +234,9 @@ Requisitos: RF07, RNF05, RNF07. Depende de: Etapas 2 e 4. Pré-condição: decis
 
 ### Etapa 6 — Deduplicação
 Requisitos: RF06. Depende de: Etapa 5. Pré-condição: decisões D10 e D13 validadas.
-- [ ] Quando nada foi inserido, consultar qual chave conflitou e responder `200 duplicate` com `reason` (`duplicate_event` para o mesmo `eventId`, `duplicate_issue` para a mesma issue com outro `eventId`), `eventId` e `state`, conforme D13 (consulta pelo `event_id` primeiro; `eventId` da entrega recebida; `state` da linha gravada).
-- [ ] Mesmo `eventId` com corpo diferente: ganha o primeiro, e é registrado o log `duplicate_mismatch` comparando os `body_hash` (D13: warning, `eventId`, `storedBodyHash`, `receivedBodyHash`; sem log quando os hashes são iguais).
-- [ ] Testes de integração: reenvio do mesmo `eventId` (`duplicate_event`, sem nova mensagem na outbox); segundo `issue.created` da mesma issue com outro `eventId` (`duplicate_issue`); evento recusado com 400 ou 401 não ocupa a chave e o reenvio corrigido é aceito; duas entregas simultâneas do mesmo `eventId` gravam uma única linha e uma única mensagem; mesmo `eventId` e mesma issue → `duplicate_event`; `duplicate_mismatch` registrado só com hash diferente.
+- [x] Quando nada foi inserido, consultar qual chave conflitou e responder `200 duplicate` com `reason` (`duplicate_event` para o mesmo `eventId`, `duplicate_issue` para a mesma issue com outro `eventId`), `eventId` e `state`, conforme D13 (consulta pelo `event_id` primeiro; `eventId` da entrega recebida; `state` da linha gravada).
+- [x] Mesmo `eventId` com corpo diferente: ganha o primeiro, e é registrado o log `duplicate_mismatch` comparando os `body_hash` (D13: warning, `eventId`, `storedBodyHash`, `receivedBodyHash`; sem log quando os hashes são iguais).
+- [x] Testes de integração: reenvio do mesmo `eventId` (`duplicate_event`, sem nova mensagem na outbox); segundo `issue.created` da mesma issue com outro `eventId` (`duplicate_issue`); evento recusado com 400 ou 401 não ocupa a chave e o reenvio corrigido é aceito; duas entregas simultâneas do mesmo `eventId` gravam uma única linha e uma única mensagem; mesmo `eventId` e mesma issue → `duplicate_event`; `duplicate_mismatch` registrado só com hash diferente.
 
 ### Etapa 7 — Relay da outbox
 Requisitos: RF07, RNF02, RNF04, RNF05. Depende de: Etapa 5. Pré-condição: decisão D6 validada e ponto em aberto P4 decidido (argumentos da fila `analysis`).

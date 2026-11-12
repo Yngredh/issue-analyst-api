@@ -10,7 +10,11 @@ import structlog
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from issue_analyst_api.adapters.issue_events import DatabaseUnavailableError
+from issue_analyst_api.adapters.issue_events import (
+    DatabaseUnavailableError,
+    Duplicate,
+    DuplicateReason,
+)
 from issue_analyst_api.api import webhooks
 from issue_analyst_api.api.app import create_app
 from issue_analyst_api.config import Settings
@@ -53,8 +57,8 @@ def _settings(**overrides: object) -> Settings:
 def _fake_store(monkeypatch: pytest.MonkeyPatch) -> None:
     """Substitui a gravação no banco: estes testes cobrem só o caminho HTTP."""
 
-    async def fake_store(*_args: object, **_kwargs: object) -> bool:
-        return True
+    async def fake_store(*_args: object, **_kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(webhooks, "store_issue_created", fake_store)
 
@@ -160,18 +164,24 @@ def test_accepted_body_has_event_id_and_result_link(client: TestClient) -> None:
     }
 
 
-def test_not_inserted_returns_200_duplicate_with_event_id(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("reason", list(DuplicateReason))
+def test_not_inserted_returns_200_duplicate_with_reason_event_id_and_state(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: DuplicateReason
 ) -> None:
-    async def already_stored(*_args: object, **_kwargs: object) -> bool:
-        return False
+    async def already_stored(*_args: object, **_kwargs: object) -> Duplicate:
+        return Duplicate(reason, "ACCEPTED")
 
     monkeypatch.setattr(webhooks, "store_issue_created", already_stored)
 
     response = _post(client, VALID_BODY, _sign(VALID_BODY))
 
     assert response.status_code == 200
-    assert response.json() == {"status": "duplicate", "eventId": "evt-001"}
+    assert response.json() == {
+        "status": "duplicate",
+        "reason": reason.value,
+        "eventId": "evt-001",
+        "state": "ACCEPTED",
+    }
 
 
 def test_database_unavailable_returns_503(
@@ -193,9 +203,9 @@ def test_edited_issue_returns_provisional_501_without_storing(
 ) -> None:
     calls: list[object] = []
 
-    async def spy(*args: object, **_kwargs: object) -> bool:
+    async def spy(*args: object, **_kwargs: object) -> None:
         calls.append(args)
-        return True
+        return None
 
     monkeypatch.setattr(webhooks, "store_issue_created", spy)
     body = VALID_BODY.replace(b'"opened"', b'"edited"')

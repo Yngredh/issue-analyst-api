@@ -44,8 +44,8 @@ def _payload(action: str = "opened", sender_type: str = "User", **issue: Any) ->
 
 @pytest.fixture(autouse=True)
 def _fake_store(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_store(*_args: object, **_kwargs: object) -> bool:
-        return True
+    async def fake_store(*_args: object, **_kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(webhooks, "store_issue_created", fake_store)
 
