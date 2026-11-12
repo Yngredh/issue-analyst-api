@@ -68,6 +68,13 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 
 **Escolha de implementação da Etapa 5 (proposta, aguarda validação):**
 - Espera máxima por conexão do pool do banco: `CONNECTION_TIMEOUT_S = 5` s (constante em `adapters/database.py`); passado esse tempo sem conexão, o webhook responde `503 unavailable`. Escolhido abaixo do tempo limite de entrega do webhook do GitHub (10 s); o padrão do psycopg (30 s) passaria desse limite.
+**Escolhas de implementação da Etapa 7 (propostas, aguardam validação):**
+- Publicação pela exchange padrão do RabbitMQ, com `routing_key` = `topic` da linha (`analysis`), `content_type = application/json` e corpo = `payload` da outbox em JSON.
+- Backoff de reconexão (D6) dobra a cada falha (1, 2, 4, ... até 30 s) e volta a 1 s depois de reconectar. Falha durante um lote (broker caiu ou falha antes de marcar) desfaz a transação do lote inteiro: as mensagens já confirmadas desse lote são publicadas de novo (at-least-once).
+- Banco indisponível no relay: as linhas ficam pendentes e o relay tenta de novo depois de `RELAY_POLL_INTERVAL_S`, sem reconectar ao broker.
+- Lote cheio (`RELAY_BATCH_SIZE` linhas) busca o próximo lote sem esperar o intervalo.
+- Encerramento: o lifespan cancela a tarefa do relay; um lote em andamento é desfeito e as linhas continuam pendentes. Sem tempo de espera para terminar o lote.
+- Sem logs no relay nesta etapa: publicação, falha de conexão e retomada ficam para a Etapa 8.
 
 ## Contratos
 
@@ -240,11 +247,11 @@ Requisitos: RF06. Depende de: Etapa 5. Pré-condição: decisões D10 e D13 vali
 
 ### Etapa 7 — Relay da outbox
 Requisitos: RF07, RNF02, RNF04, RNF05. Depende de: Etapa 5. Pré-condição: decisão D6 validada e ponto em aberto P4 decidido (argumentos da fila `analysis`).
-- [ ] Tarefa em segundo plano iniciada no lifespan, fora do caminho da requisição: lê até `RELAY_BATCH_SIZE` linhas com `published_at` nulo em ordem de `id` (`FOR UPDATE SKIP LOCKED`), publica e marca `published_at` na mesma transação da leitura.
-- [ ] Publicação com aio-pika na fila durável `analysis`: mensagem persistente, `message_id = dedup_key`, publisher confirms; `published_at` só é marcado depois da confirmação.
-- [ ] Broker indisponível: o relay tenta reconectar com backoff (D6) sem derrubar o serviço, e a entrada continua respondendo 202.
-- [ ] Declarar a fila `analysis` conforme a decisão de P4.
-- [ ] Testes de integração com RabbitMQ do testcontainers: mensagens pendentes publicadas em ordem e marcadas; broker parado acumula na outbox e publica ao voltar; queda entre publicar e marcar republica na volta (at-least-once); o encerramento do serviço para o relay sem perder linhas.
+- [x] Tarefa em segundo plano iniciada no lifespan, fora do caminho da requisição: lê até `RELAY_BATCH_SIZE` linhas com `published_at` nulo em ordem de `id` (`FOR UPDATE SKIP LOCKED`), publica e marca `published_at` na mesma transação da leitura.
+- [x] Publicação com aio-pika na fila durável `analysis`: mensagem persistente, `message_id = dedup_key`, publisher confirms; `published_at` só é marcado depois da confirmação.
+- [x] Broker indisponível: o relay tenta reconectar com backoff (D6) sem derrubar o serviço, e a entrada continua respondendo 202.
+- [x] Declarar a fila `analysis` conforme a decisão de P4.
+- [x] Testes de integração com RabbitMQ do testcontainers: mensagens pendentes publicadas em ordem e marcadas; broker parado acumula na outbox e publica ao voltar; queda entre publicar e marcar republica na volta (at-least-once); o encerramento do serviço para o relay sem perder linhas.
 
 ### Etapa 8 — Observabilidade da entrada
 Requisitos: RNF14. Depende de: Etapas 6 e 7.
