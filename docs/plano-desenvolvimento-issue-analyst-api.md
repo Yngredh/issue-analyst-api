@@ -39,7 +39,7 @@ As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa
 
 ## Decisões técnicas da implementação
 
-Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6 e D10 validadas pelo usuário em 2026-11-10 como estão; D9 alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec. Regra geral do usuário: em caso de dúvida ou divergência, prevalece o que está definido na Ingestão Spec.**
+Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6 e D10 validadas pelo usuário em 2026-11-10 como estão; D9 alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec; D13 validada pelo usuário em 2026-11-12. Regra geral do usuário: em caso de dúvida ou divergência, prevalece o que está definido na Ingestão Spec.**
 
 | # | Ponto | Escolha proposta |
 |---|---|---|
@@ -55,6 +55,7 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 | D10 | "Estado atual" no `duplicate` | `status` lido de `inbound.issue_events` (sempre `ACCEPTED` nesta entrega); a combinação com triage e publisher fica para a spec da consulta |
 | D11 | Limite do corpo | **Alterada pelo usuário em 2026-11-10:** configurável pela variável `WEBHOOK_MAX_BODY_BYTES` (int, padrão 1.048.576 bytes = 1 MB), em vez de constante no código |
 | D12 | Detalhes da normalização e validação (Etapa 4), **validada pelo usuário em 2026-11-10** | 1) `occurredAt` ausente, não string, fora de ISO 8601 ou sem fuso (não se assume UTC) **não recusa o evento**: o normalizado sai com `occurredAt = null` e `occurredAtFallback` = `missing` ou `invalid`, é registrado o log de warning `occurred_at_fallback` com o motivo, e a Etapa 5 grava em `occurred_at` o mesmo instante de `received_at` (a coluna continua NOT NULL); `occurredAt` nunca entra em `missing_fields` nem em `invalid_fields`. 2) `missing_event_id` responde `"fields": ["eventId"]`; só `invalid_payload` usa a lista vazia. 3) JSON válido que não é objeto → `400 invalid_payload` com `"fields": []`, antes do filtro. 4) Motivos de `ignored` avaliados na ordem da D7 (`ping` > `unsupported_event` > `unsupported_action` > `bot_sender`), e o filtro roda antes da exigência de `X-GitHub-Delivery`: um `ping` sem `X-GitHub-Delivery` responde `200 ignored`. 5) Descrição só com espaços é gravada como `""`; não string ou acima do limite → `invalid_fields`; os limites contam caracteres, não bytes. 6) `repository` no formato `owner/name` (uma barra, partes não vazias e sem espaços; ausente/`null` → `missing_fields`, vazio ou não string → `invalid_fields`); `issueNumber` aceito só com `type(v) is int` e ≥ 1 (`true`, `7.0`, `"7"` → `invalid_fields`); limites inclusivos (`<=`); ordem dos campos no erro: repository, issueNumber, title, description |
+| D13 | Detalhes da deduplicação (Etapa 6), **validada pelo usuário em 2026-11-12** | 1) Em `duplicate_issue`, `eventId` da resposta é o da entrega que acabou de chegar, não o do `issue.created` já gravado. 2) Estado atual = campo `"state": "ACCEPTED"` em texto (D10), lido da linha já gravada: em `duplicate_event`, a do mesmo `eventId`; em `duplicate_issue`, a do `issue.created` da issue. 3) Log `duplicate_mismatch` só em `duplicate_event` e só quando os hashes diferem: nível warning, campos `eventId`, `storedBodyHash` e `receivedBodyHash`; é um log extra, além do log de decisão da Etapa 8. 4) Na consulta feita depois do conflito, o `event_id` é verificado **primeiro** e só depois o par `repository + issue_number`: mesmo `eventId` e mesma issue ao mesmo tempo → `duplicate_event`. Com `ON CONFLICT DO NOTHING`, o PostgreSQL espera a transação concorrente terminar, então a consulta sempre encontra a linha vencedora |
 
 **Decisões aprovadas pelo usuário em 2026-11-10 (tomadas na Etapa 1):**
 - `DATABASE_URL` e `RABBITMQ_URL` são obrigatórias, sem valor padrão.
@@ -136,7 +137,13 @@ Fila durável `analysis`, mensagem persistente, `message_id` = `dedup_key`. Payl
 ```json
 {"eventId": "evt-001", "attempt": 1, "trigger": "initial", "triggerRef": null}
 ```
-O `issue-triage` descarta repetições por `eventId + attempt`; a entrega do relay é at-least-once.
+Payload de um `issue.edited` (P1, decidido em 2026-11-12), gravado só quando a issue já tem `issue.created` em `inbound.issue_events`; sem ele, a edição é só registrada, sem mensagem:
+```json
+{"eventId": "<origin_event_id>", "attempt": null, "trigger": "author_edit", "triggerRef": "<delivery id da edição>"}
+```
+Na outbox: `event_id = origin_event_id`, `dedup_key = '<origin_event_id>:edit:<delivery id>'`. A entrada não lê o estado do caso (schema `triage`): o `issue-triage` decide se a edição reabre a análise (só em `READY_TO_PUBLISH` com `empty_description`, com `attempt = current_attempt + 1`) e descarta as demais com log.
+
+O `issue-triage` descarta repetições por `eventId + attempt` (na edição, `eventId + triggerRef`); a entrega do relay é at-least-once.
 
 ### Variáveis de ambiente
 `LOG_LEVEL`, `SERVICE_NAME`, `HTTP_PORT`, `DATABASE_URL`, `RABBITMQ_URL`, `GITHUB_WEBHOOK_SECRET`, `WEBHOOK_MAX_BODY_BYTES`, `MAX_TITLE_CHARS`, `MAX_DESCRIPTION_CHARS`, `RELAY_POLL_INTERVAL_S`, `RELAY_BATCH_SIZE`. O `.env.example` traz só os nomes.
@@ -226,10 +233,10 @@ Requisitos: RF07, RNF05, RNF07. Depende de: Etapas 2 e 4. Pré-condição: decis
 - [x] Windows: `main.py` sobe o uvicorn com `SelectorEventLoop` (decisão do usuário de 2026-11-10).
 
 ### Etapa 6 — Deduplicação
-Requisitos: RF06. Depende de: Etapa 5. Pré-condição: decisão D10 validada.
-- [ ] Quando nada foi inserido, consultar qual chave conflitou e responder `200 duplicate` com `reason` (`duplicate_event` para o mesmo `eventId`, `duplicate_issue` para a mesma issue com outro `eventId`), `eventId` e `state`.
-- [ ] Mesmo `eventId` com corpo diferente: ganha o primeiro, e é registrado o log `duplicate_mismatch` comparando os `body_hash`.
-- [ ] Testes de integração: reenvio do mesmo `eventId` (`duplicate_event`, sem nova mensagem na outbox); segundo `issue.created` da mesma issue com outro `eventId` (`duplicate_issue`); evento recusado com 400 ou 401 não ocupa a chave e o reenvio corrigido é aceito; duas entregas simultâneas do mesmo `eventId` gravam uma única linha e uma única mensagem.
+Requisitos: RF06. Depende de: Etapa 5. Pré-condição: decisões D10 e D13 validadas.
+- [ ] Quando nada foi inserido, consultar qual chave conflitou e responder `200 duplicate` com `reason` (`duplicate_event` para o mesmo `eventId`, `duplicate_issue` para a mesma issue com outro `eventId`), `eventId` e `state`, conforme D13 (consulta pelo `event_id` primeiro; `eventId` da entrega recebida; `state` da linha gravada).
+- [ ] Mesmo `eventId` com corpo diferente: ganha o primeiro, e é registrado o log `duplicate_mismatch` comparando os `body_hash` (D13: warning, `eventId`, `storedBodyHash`, `receivedBodyHash`; sem log quando os hashes são iguais).
+- [ ] Testes de integração: reenvio do mesmo `eventId` (`duplicate_event`, sem nova mensagem na outbox); segundo `issue.created` da mesma issue com outro `eventId` (`duplicate_issue`); evento recusado com 400 ou 401 não ocupa a chave e o reenvio corrigido é aceito; duas entregas simultâneas do mesmo `eventId` gravam uma única linha e uma única mensagem; mesmo `eventId` e mesma issue → `duplicate_event`; `duplicate_mismatch` registrado só com hash diferente.
 
 ### Etapa 7 — Relay da outbox
 Requisitos: RF07, RNF02, RNF04, RNF05. Depende de: Etapa 5. Pré-condição: decisão D6 validada e ponto em aberto P4 decidido (argumentos da fila `analysis`).
@@ -248,10 +255,10 @@ Requisitos: RNF14. Depende de: Etapas 6 e 7.
 - [ ] Testes com `structlog.testing.capture_logs` cobrindo as quatro decisões e a ausência de dados sensíveis.
 
 ### Etapa 9 — Mensagem de issue.edited
-Requisitos: RF28 (entrada). Depende de: Etapa 6. Pré-condição: ponto em aberto P1 decidido e registrado neste plano.
-- [ ] Gravar o `issue.edited` aceito em `inbound.issue_events` e a mensagem de `analysis` no formato decidido em P1, na mesma transação.
-- [ ] Substituir o `501` provisório do `issue.edited` pela resposta definitiva.
-- [ ] Testes de integração do formato decidido, incluindo reenvio do mesmo `issue.edited` (`duplicate_event`).
+Requisitos: RF28 (entrada). Depende de: Etapa 6. Pré-condição: ponto em aberto P1 decidido e registrado neste plano (decidido em 2026-11-12).
+- [ ] Gravar o `issue.edited` aceito em `inbound.issue_events` e, na mesma transação, se existir `issue.created` da mesma issue, gravar em `inbound.inbound_outbox` a mensagem de "Contratos > Mensagem da fila `analysis`" para edição (`event_id = origin_event_id`, `attempt` nulo, `trigger = author_edit`, `triggerRef` = delivery id, `dedup_key = '<origin_event_id>:edit:<delivery id>'`). Sem `issue.created`, só grava o evento. Não ler o schema `triage`.
+- [ ] Substituir o `501` provisório do `issue.edited` pela resposta definitiva: `202 accepted` com `eventId` e `links.result` (D9), com ou sem mensagem.
+- [ ] Testes de integração: edição de issue com `issue.created` gravado (uma linha em cada tabela, payload e `dedup_key` exatos); edição sem `issue.created` (evento gravado, outbox vazia); reenvio do mesmo `issue.edited` (`duplicate_event`, sem nova mensagem); duas edições diferentes da mesma issue geram duas mensagens.
 
 ### Etapa 10 — Resiliência, script de envio e demonstração
 Requisitos: RNF01, RNF02, RNF16. Depende de: Etapas 7, 8 e 9.
@@ -267,7 +274,7 @@ Divergências entre documentos e lacunas que bloqueiam etapas. Cada decisão tom
 
 | # | Ponto | Situação | Bloqueia |
 |---|---|---|---|
-| P1 | Mensagem de `issue.edited` | A Entrada de issues diz que o evento é enfileirado e o `issue-triage` decide se a edição importa. O High Level Design (seção 3.2) e a Modelagem de dados dizem que o `issue-analyst-api` produz `attempt + 1` só em `READY_TO_PUBLISH` com `empty_description`, com o `origin_event_id` do caso em `eventId` e o delivery id da edição em `triggerRef`. Falta decidir quem filtra e o formato do payload | Etapa 9 |
+| P1 | Mensagem de `issue.edited` | **Decidido pelo usuário em 2026-11-12, seguindo a Ingestão Spec:** toda edição válida é gravada; se a issue já tem `issue.created`, vai para a fila `analysis` com `attempt` nulo, `trigger = author_edit` e `triggerRef` = delivery id (formato em "Contratos > Mensagem da fila `analysis`"); o `issue-triage` decide se a edição reabre a análise. High Level Design (seção 3.2) e Modelagem de dados corrigidos em 2026-11-12 (inclui o índice `triage.analysis_attempts_one_per_edit`). Situação original: a Ingestão Spec dizia que o `issue-triage` decide; o High Level Design e a Modelagem de dados diziam que o `issue-analyst-api` filtra e produz `attempt + 1` | Etapa 9 |
 | P2 | Nomes das tabelas | A Entrada de issues usa `ingested_events`, `outbox` e o índice `ingested_events_one_created_per_issue`; a Modelagem de dados usa `inbound.issue_events`, `inbound.inbound_outbox` e `issue_events_one_created_per_issue`. Este plano segue a Modelagem de dados, que é a referência das colunas | — (corrigir a Entrada de issues) |
 | P3 | Coluna `missing_description` | Citada na Entrada de issues e ausente no DDL da Modelagem de dados. Este plano deriva `missingDescription` de `description = ''`, sem coluna | — (corrigir a Entrada de issues) |
 | P5 | Papéis e permissões do banco | O `GRANT` e o papel `analyst_api` da Modelagem de dados atravessam serviços; falta decidir onde ficam (script de inicialização do ambiente integrado) e onde mora o compose que sobe os três serviços | Não bloqueia: este plano usa o compose local e `DATABASE_URL` |
