@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import aio_pika
 import psycopg
 import pytest
+import structlog
 from aio_pika.abc import AbstractIncomingMessage
 from aio_pika.exceptions import ChannelPreconditionFailed
 from fastapi.testclient import TestClient
@@ -71,9 +72,7 @@ def _insert_outbox(database_url: str, count: int) -> list[str]:
     return keys
 
 
-async def _run_until_all_published(
-    relay: OutboxRelay, database_url: str, keys: list[str]
-) -> None:
+async def _run_until_all_published(relay: OutboxRelay, database_url: str, keys: list[str]) -> None:
     """Roda o relay até todas as `keys` estarem marcadas como publicadas e o para."""
 
     def all_published() -> bool:
@@ -144,6 +143,29 @@ async def test_pending_messages_are_published_in_order_and_marked(
         }
         assert message.delivery_mode == aio_pika.DeliveryMode.PERSISTENT
         assert message.content_type == "application/json"
+
+
+async def test_each_published_message_is_logged_with_event_id_in_context(
+    pool: AsyncConnectionPool, database_url: str, rabbitmq_url: str
+) -> None:
+    keys = _insert_outbox(database_url, 2)
+    relay = _relay(pool, rabbitmq_url)
+
+    with structlog.testing.capture_logs(
+        processors=[structlog.contextvars.merge_contextvars]
+    ) as logs:
+        await _run_until_all_published(relay, database_url, keys)
+
+    published = [
+        entry
+        for entry in logs
+        if entry["event"] == "relay_message_published" and entry["dedupKey"] in keys
+    ]
+    assert [(entry["eventId"], entry["dedupKey"]) for entry in published] == [
+        (key.removesuffix(":1"), key) for key in keys
+    ]
+    assert all(entry["topic"] == ANALYSIS_QUEUE for entry in published)
+    assert "relay_broker_connected" in [entry["event"] for entry in logs]
 
 
 async def test_analysis_queue_is_declared_durable_without_arguments(

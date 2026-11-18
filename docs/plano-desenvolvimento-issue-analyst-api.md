@@ -79,6 +79,12 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 - Encerramento: o lifespan cancela a tarefa do relay; um lote em andamento é desfeito e as linhas continuam pendentes. Sem tempo de espera para terminar o lote.
 - Sem logs no relay nesta etapa: publicação, falha de conexão e retomada ficam para a Etapa 8.
 
+**Escolhas de implementação da Etapa 8 (propostas, aguardam validação):**
+- Log de decisão do webhook: evento `webhook_response` com `httpStatus`, `decision` e `reason` (nível info; warning em `rejected`). `accepted` vai com `reason = null` e mais `type`, `repository`, `issueNumber` e `missingDescription`; `duplicate` traz `state`; `400` traz `fields` (só os nomes dos campos).
+- Motivos de `rejected` fora dos códigos de erro do contrato: `invalid_signature` (401), `payload_too_large` (413), `unavailable` (503) e `not_implemented` (501 provisório do `issue.edited` até a Etapa 9). O 503 também é registrado como `rejected`.
+- `eventId` (header `X-GitHub-Delivery`) entra no contexto do structlog só depois da assinatura conferida: 401 e 413 saem sem `eventId`. Sai do contexto no fim de cada requisição.
+- Relay: `relay_message_published` (info, `eventId` no contexto, `outboxId`, `topic`, `dedupKey`) depois do commit do lote; `relay_broker_connected` na primeira conexão; `relay_broker_connection_failed` (warning, `error` = tipo da exceção, `retryInS`) em cada falha de conexão ou de publicação; `relay_broker_connection_resumed` ao reconectar depois de falha; `relay_database_unavailable` (warning, só na primeira falha seguida) e `relay_database_resumed`. Erros vão só pelo tipo da exceção, para não levar URL com credencial ao log.
+
 ## Contratos
 
 ### Entrada
@@ -348,11 +354,11 @@ Requisitos: RF07, RNF02, RNF04, RNF05. Depende de: Etapa 5. Pré-condição: dec
 
 ### Etapa 8 — Observabilidade da entrada
 Requisitos: RNF14. Depende de: Etapas 6 e 7.
-- [ ] Um log estruturado por resposta do webhook com `eventId` (quando houver), código HTTP e decisão (`accepted`, `duplicate`, `ignored`, `rejected`) e o motivo.
-- [ ] `eventId` ligado ao contexto do structlog durante a requisição e nas publicações do relay.
-- [ ] Logs do relay: publicação, falha de conexão e retomada.
-- [ ] Nenhum log contém o segredo, o corpo bruto ou a descrição completa.
-- [ ] Testes com `structlog.testing.capture_logs` cobrindo as quatro decisões e a ausência de dados sensíveis.
+- [x] Um log estruturado por resposta do webhook com `eventId` (quando houver), código HTTP e decisão (`accepted`, `duplicate`, `ignored`, `rejected`) e o motivo.
+- [x] `eventId` ligado ao contexto do structlog durante a requisição e nas publicações do relay.
+- [x] Logs do relay: publicação, falha de conexão e retomada.
+- [x] Nenhum log contém o segredo, o corpo bruto ou a descrição completa.
+- [x] Testes com `structlog.testing.capture_logs` cobrindo as quatro decisões e a ausência de dados sensíveis.
 
 ### Etapa 9 — Mensagem de issue.edited
 Requisitos: RF28 (entrada). Depende de: Etapa 6. Pré-condição: ponto em aberto P1 decidido e registrado neste plano (decidido em 2026-11-12).

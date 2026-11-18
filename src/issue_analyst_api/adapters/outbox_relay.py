@@ -6,6 +6,10 @@ relay lê as linhas pendentes em ordem de `id`, publica cada uma com publisher c
 `published_at` na mesma transação da leitura, só depois da confirmação do broker. Se algo falhar
 entre publicar e marcar, a transação é desfeita e a linha é publicada de novo na próxima volta
 (entrega at-least-once; o `issue-triage` descarta repetições).
+
+Logs (RNF14): cada mensagem publicada (com o `eventId` no contexto do structlog), falha de
+conexão com o broker ou o banco e a retomada depois da falha. Erros são registrados só pelo tipo
+da exceção, para que URLs com credenciais nunca vão para o log.
 """
 
 import asyncio
@@ -14,6 +18,7 @@ import json
 
 import aio_pika
 import psycopg
+import structlog
 from aio_pika.abc import AbstractChannel, AbstractConnection
 from psycopg_pool import AsyncConnectionPool
 
@@ -24,7 +29,7 @@ RECONNECT_BACKOFF_INITIAL_S = 1.0
 RECONNECT_BACKOFF_MAX_S = 30.0
 
 _SELECT_PENDING = """
-SELECT id, topic, dedup_key, payload
+SELECT id, event_id, topic, dedup_key, payload
 FROM inbound.inbound_outbox
 WHERE published_at IS NULL
 ORDER BY id
@@ -67,6 +72,13 @@ class OutboxRelay:
         self._connection: AbstractConnection | None = None
         self._channel: AbstractChannel | None = None
         self._task: asyncio.Task[None] | None = None
+        # Estado das falhas, para registrar a retomada só depois de uma falha.
+        self._broker_failed = False
+        self._database_failed = False
+
+    @property
+    def _log(self) -> structlog.typing.FilteringBoundLogger:
+        return structlog.get_logger()
 
     def start(self) -> None:
         """Inicia o relay como tarefa do loop atual, sem esperar o broker."""
@@ -92,26 +104,55 @@ class OutboxRelay:
             if self._channel is None or self._channel.is_closed:
                 try:
                     await self._connect()
-                except Exception:
+                except Exception as exc:
+                    self._broker_failed = True
+                    self._log.warning(
+                        "relay_broker_connection_failed",
+                        error=type(exc).__name__,
+                        retryInS=backoff_s,
+                    )
                     await self._close_broker()
                     await asyncio.sleep(backoff_s)
                     backoff_s = min(backoff_s * 2, self._backoff_max_s)
                     continue
                 backoff_s = self._backoff_initial_s
+                if self._broker_failed:
+                    self._broker_failed = False
+                    self._log.info("relay_broker_connection_resumed")
+                else:
+                    self._log.info("relay_broker_connected")
 
             try:
                 published = await self.publish_pending()
-            except psycopg.Error:
+            except psycopg.Error as exc:
                 # Banco indisponível: as linhas continuam pendentes; tenta na próxima volta.
+                # Registrado só na primeira falha, para não repetir o log a cada intervalo.
+                if not self._database_failed:
+                    self._database_failed = True
+                    self._log.warning(
+                        "relay_database_unavailable",
+                        error=type(exc).__name__,
+                        retryInS=self._poll_interval_s,
+                    )
                 await asyncio.sleep(self._poll_interval_s)
                 continue
-            except Exception:
+            except Exception as exc:
                 # Falha no broker durante a publicação: a transação foi desfeita e a conexão é
                 # refeita com backoff.
+                self._broker_failed = True
+                self._log.warning(
+                    "relay_broker_connection_failed",
+                    error=type(exc).__name__,
+                    retryInS=backoff_s,
+                )
                 await self._close_broker()
                 await asyncio.sleep(backoff_s)
                 backoff_s = min(backoff_s * 2, self._backoff_max_s)
                 continue
+
+            if self._database_failed:
+                self._database_failed = False
+                self._log.info("relay_database_resumed")
 
             if published < self._batch_size:
                 await asyncio.sleep(self._poll_interval_s)
@@ -141,17 +182,27 @@ class OutboxRelay:
             rows = await cursor.fetchall()
             if not rows:
                 return 0
-            for _, topic, dedup_key, payload in rows:
+            for _, event_id, topic, dedup_key, payload in rows:
                 message = aio_pika.Message(
                     body=json.dumps(payload).encode(),
                     content_type="application/json",
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                     message_id=dedup_key,
                 )
-                # Com publisher confirms, o `publish` só retorna depois do ack do broker.
-                await exchange.publish(message, routing_key=topic)
+                with structlog.contextvars.bound_contextvars(eventId=event_id):
+                    # Com publisher confirms, o `publish` só retorna depois do ack do broker.
+                    await exchange.publish(message, routing_key=topic)
             await self._mark_published(conn, [row[0] for row in rows])
-            return len(rows)
+        # Log só depois do commit: a mensagem foi confirmada pelo broker e marcada na outbox.
+        for outbox_id, event_id, topic, dedup_key, _ in rows:
+            with structlog.contextvars.bound_contextvars(eventId=event_id):
+                self._log.info(
+                    "relay_message_published",
+                    outboxId=outbox_id,
+                    topic=topic,
+                    dedupKey=dedup_key,
+                )
+        return len(rows)
 
     async def _mark_published(self, conn: psycopg.AsyncConnection, ids: list[int]) -> None:
         await conn.execute(_MARK_PUBLISHED, {"ids": ids})
