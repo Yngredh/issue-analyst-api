@@ -79,7 +79,7 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 - Encerramento: o lifespan cancela a tarefa do relay; um lote em andamento é desfeito e as linhas continuam pendentes. Sem tempo de espera para terminar o lote.
 - Sem logs no relay nesta etapa: publicação, falha de conexão e retomada ficam para a Etapa 8.
 
-**Escolhas de implementação da Etapa 8 (propostas, aguardam validação):**
+**Escolhas de implementação da Etapa 8 (validadas pelo usuário em 2026-11-18):**
 - Log de decisão do webhook: evento `webhook_response` com `httpStatus`, `decision` e `reason` (nível info; warning em `rejected`). `accepted` vai com `reason = null` e mais `type`, `repository`, `issueNumber` e `missingDescription`; `duplicate` traz `state`; `400` traz `fields` (só os nomes dos campos).
 - Motivos de `rejected` fora dos códigos de erro do contrato: `invalid_signature` (401), `payload_too_large` (413), `unavailable` (503) e `not_implemented` (501 provisório do `issue.edited` até a Etapa 9). O 503 também é registrado como `rejected`.
 - `eventId` (header `X-GitHub-Delivery`) entra no contexto do structlog só depois da assinatura conferida: 401 e 413 saem sem `eventId`. Sai do contexto no fim de cada requisição.
