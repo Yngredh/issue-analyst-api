@@ -1,8 +1,11 @@
 """Fixtures compartilhadas dos testes."""
 
 import asyncio
+import importlib.util
 import sys
 from collections.abc import Iterator
+from pathlib import Path
+from types import ModuleType
 
 import psycopg
 import pytest
@@ -57,3 +60,13 @@ def rabbitmq_url_of(container: RabbitMqContainer) -> str:
 def rabbitmq_url(rabbitmq_container: RabbitMqContainer) -> str:
     """URL AMQP do RabbitMQ da sessão."""
     return rabbitmq_url_of(rabbitmq_container)
+
+
+def load_send_event_script() -> ModuleType:
+    """Carrega `scripts/send_event.py` como módulo (a pasta `scripts/` não é um pacote)."""
+    path = Path(__file__).resolve().parent.parent / "scripts" / "send_event.py"
+    spec = importlib.util.spec_from_file_location("send_event", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

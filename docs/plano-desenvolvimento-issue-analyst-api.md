@@ -368,9 +368,9 @@ Requisitos: RF28 (entrada). Depende de: Etapa 6. Pré-condição: ponto em abert
 
 ### Etapa 10 — Resiliência, script de envio e demonstração
 Requisitos: RNF01, RNF02, RNF16. Depende de: Etapas 7, 8 e 9.
-- [ ] Criar `scripts/send_event.py`: monta um payload no formato do GitHub (`opened` ou `edited`, repositório, número, título, descrição e delivery id por argumento), assina com `GITHUB_WEBHOOK_SECRET` lido do ambiente e envia ao `POST /webhooks/github`.
-- [ ] Testes de ponta a ponta da entrada (serviço, PostgreSQL e RabbitMQ reais, sem consumidor): sem `issue-triage`, a mensagem fica pendente na fila `analysis`; broker parado → 202 e a outbox publica ao voltar; banco parado → 503; reenvio da mesma entrega → `200 duplicate` e uma única mensagem na fila.
-- [ ] README: como rodar localmente, migrar, enviar eventos com o script, rodar os testes e o que é real ou simulado em cada teste.
+- [x] Criar `scripts/send_event.py`: monta um payload no formato do GitHub (`opened` ou `edited`, repositório, número, título, descrição e delivery id por argumento), assina com `GITHUB_WEBHOOK_SECRET` lido do ambiente e envia ao `POST /webhooks/github`.
+- [x] Testes de ponta a ponta da entrada (serviço, PostgreSQL e RabbitMQ reais, sem consumidor): sem `issue-triage`, a mensagem fica pendente na fila `analysis`; broker parado → 202 e a outbox publica ao voltar; banco parado → 503; reenvio da mesma entrega → `200 duplicate` e uma única mensagem na fila.
+- [x] README: como rodar localmente, migrar, enviar eventos com o script, rodar os testes e o que é real ou simulado em cada teste.
 - [ ] (manual) Configurar o webhook no repositório de teste do GitHub apontando para o serviço por um túnel e com o segredo configurado.
 - [ ] (manual) Executar o trecho da entrada no roteiro da demonstração: parar o `issue-triage`, abrir uma issue, mostrar o 202 e a mensagem pendente; reenviar a entrega e mostrar o `200 duplicate`.
 
