@@ -1,8 +1,8 @@
 # Plano de desenvolvimento — issue-analyst-api (Entrada de issues)
 
-Plano de implementação da **Entrada de issues (issue-analyst-api) | Spec Geral**, organizado em etapas para execução por agentes orquestrados. Cobre a entrada do sistema: webhook do GitHub → assinatura → filtro → normalização e validação → deduplicação → persistência com outbox → relay para a fila `analysis` → resposta 202 sem esperar a análise.
+Plano de implementação da **Entrada de issues (issue-analyst-api) | Spec Geral**, organizado em etapas para execução por agentes orquestrados. Cobre a entrada do sistema: webhook do GitHub → assinatura → filtro → normalização e validação → deduplicação → persistência com outbox → relay para a fila `analysis` → resposta 202 sem esperar a análise. Cobre também a API de consulta do resultado por repositório e número da issue (RF27, Etapa 11).
 
-Requisitos atendidos: RF01 a RF07, entrada do RF28 (`issues.edited`), RNF01, RNF02, RNF04, RNF05, RNF07, RNF14, RNF16 e RNF18.
+Requisitos atendidos: RF01 a RF07, RF27, entrada do RF28 (`issues.edited`), RNF01, RNF02, RNF04, RNF05, RNF07, RNF14, RNF16 e RNF18.
 
 ## Cabeçalho
 
@@ -39,7 +39,7 @@ As seções "Contratos" e "Modelo de dados" deste plano resumem o que cada etapa
 
 ## Decisões técnicas da implementação
 
-Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6 e D10 validadas pelo usuário em 2026-11-10 como estão; D9 alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec; D13 validada pelo usuário em 2026-11-12. Regra geral do usuário: em caso de dúvida ou divergência, prevalece o que está definido na Ingestão Spec.**
+Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 validadas pelo usuário em 2026-11-10; D7 e D8 validadas pelo usuário em 2026-11-10 como estão; D11 validada pelo usuário em 2026-11-10 com alteração (limite configurável); D12 validada pelo usuário em 2026-11-10; D6 e D10 validadas pelo usuário em 2026-11-10 como estão; D9 alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec; D13 validada pelo usuário em 2026-11-12; D14 e D16 validadas pelo usuário em 2026-11-18; D15 proposta em 2026-11-18, aguarda validação. Regra geral do usuário: em caso de dúvida ou divergência, prevalece o que está definido na Ingestão Spec.**
 
 | # | Ponto | Escolha proposta |
 |---|---|---|
@@ -52,10 +52,13 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 | D7 | Motivos de `ignored` | `ping`, `unsupported_event`, `unsupported_action`, `bot_sender` |
 | D8 | Corpo dos erros 400 | `{"error": "<código>", "fields": ["<campo>", ...]}`; precedência: `invalid_payload` > `missing_event_id` > `missing_fields` > `invalid_fields` |
 | D9 | Link de consulta no 202 | **Alterada pelo usuário em 2026-11-10 para seguir a Ingestão Spec:** objeto `links` com `result` = `/issues/{owner}/{repo}/{number}`, em vez do campo `statusUrl`. Exemplo da spec: `{"status": "accepted", "eventId": "evt-001", "links": {"result": "/issues/equipe/projeto-teste/42"}}` |
-| D10 | "Estado atual" no `duplicate` | `status` lido de `inbound.issue_events` (sempre `ACCEPTED` nesta entrega); a combinação com triage e publisher fica para a spec da consulta |
+| D10 | "Estado atual" no `duplicate` | **Atualizada em 2026-11-18:** `state` lido de `inbound.issue_events` (sempre `ACCEPTED`), que é o estado do aceite, e não o status do caso; o status combinado com triage e publisher é o da consulta (RF27, D14 e D16), e o `duplicate` não lê a view |
 | D11 | Limite do corpo | **Alterada pelo usuário em 2026-11-10:** configurável pela variável `WEBHOOK_MAX_BODY_BYTES` (int, padrão 1.048.576 bytes = 1 MB), em vez de constante no código |
 | D12 | Detalhes da normalização e validação (Etapa 4), **validada pelo usuário em 2026-11-10** | 1) `occurredAt` ausente, não string, fora de ISO 8601 ou sem fuso (não se assume UTC) **não recusa o evento**: o normalizado sai com `occurredAt = null` e `occurredAtFallback` = `missing` ou `invalid`, é registrado o log de warning `occurred_at_fallback` com o motivo, e a Etapa 5 grava em `occurred_at` o mesmo instante de `received_at` (a coluna continua NOT NULL); `occurredAt` nunca entra em `missing_fields` nem em `invalid_fields`. 2) `missing_event_id` responde `"fields": ["eventId"]`; só `invalid_payload` usa a lista vazia. 3) JSON válido que não é objeto → `400 invalid_payload` com `"fields": []`, antes do filtro. 4) Motivos de `ignored` avaliados na ordem da D7 (`ping` > `unsupported_event` > `unsupported_action` > `bot_sender`), e o filtro roda antes da exigência de `X-GitHub-Delivery`: um `ping` sem `X-GitHub-Delivery` responde `200 ignored`. 5) Descrição só com espaços é gravada como `""`; não string ou acima do limite → `invalid_fields`; os limites contam caracteres, não bytes. 6) `repository` no formato `owner/name` (uma barra, partes não vazias e sem espaços; ausente/`null` → `missing_fields`, vazio ou não string → `invalid_fields`); `issueNumber` aceito só com `type(v) is int` e ≥ 1 (`true`, `7.0`, `"7"` → `invalid_fields`); limites inclusivos (`<=`); ordem dos campos no erro: repository, issueNumber, title, description |
 | D13 | Detalhes da deduplicação (Etapa 6), **validada pelo usuário em 2026-11-12** | 1) Em `duplicate_issue`, `eventId` da resposta é o da entrega que acabou de chegar, não o do `issue.created` já gravado. 2) Estado atual = campo `"state": "ACCEPTED"` em texto (D10), lido da linha já gravada: em `duplicate_event`, a do mesmo `eventId`; em `duplicate_issue`, a do `issue.created` da issue. 3) Log `duplicate_mismatch` só em `duplicate_event` e só quando os hashes diferem: nível warning, campos `eventId`, `storedBodyHash` e `receivedBodyHash`; é um log extra, além do log de decisão da Etapa 8. 4) Na consulta feita depois do conflito, o `event_id` é verificado **primeiro** e só depois o par `repository + issue_number`: mesmo `eventId` e mesma issue ao mesmo tempo → `duplicate_event`. Com `ON CONFLICT DO NOTHING`, o PostgreSQL espera a transação concorrente terminar, então a consulta sempre encontra a linha vencedora |
+| D14 | Contrato da consulta (RF27), **validada pelo usuário em 2026-11-18** | `GET /issues/{owner}/{repo}/{number}` lê `inbound.issue_presentation` com `repository = '<owner>/<repo>'` e `issue_number`; somente leitura e sem autenticação; é o endereço de `links.result` do 202 (D9). Resposta, códigos e regras de `null` em "Contratos > Consulta". A seção correspondente entra na Ingestão Spec ("Consulta (RF27)"), que é a spec dos endpoints de apresentação do `issue-analyst-api` |
+| D15 | Criação da view e testes (Etapa 11), **proposta em 2026-11-18, aguarda validação** | A view é criada pela migração `0002_issue_presentation.sql`, que lê tabelas de `triage` e `publisher`. A migração é estrita (falha se elas não existirem), então só roda depois das migrações dos outros dois, como no compose integrado (plano do issue-triage, Etapa 13, P2 e P5). Nos testes, `tests/fixtures/sql/triage_publisher_stub.sql` (cópia literal do DDL de `triage.issue_cases`, `triage.analysis_attempts`, `triage.proposals` e `publisher.publications` da Modelagem de dados) é aplicado antes das migrações e nunca vai para `migrations/`. Fora do compose integrado, rodar o `migrate` exige o stub ou os dois schemas já migrados |
+| D16 | Status combinado na leitura (decisão 3 da Modelagem de dados), **validada pelo usuário em 2026-11-18** | A falha permanente de publicação aparece como `NEEDS_REVIEW (technical_failure)` só na view: `publications.state = 'FAILED'` com `revision = current_attempt` e caso em `READY_TO_PUBLISH`. Sem escrita cruzada e sem mudança de código no `issue-triage` nem no `issue-publisher`: a regra vive na migração da Etapa 11 e é coberta por teste. O endpoint de resolução (fora deste plano) reaproveitará a mesma regra |
 
 **Decisões aprovadas pelo usuário em 2026-11-10 (tomadas na Etapa 1):**
 - `DATABASE_URL` e `RABBITMQ_URL` são obrigatórias, sem valor padrão.
@@ -139,6 +142,45 @@ Exemplo de corpo de erro na spec:
 
 Nenhuma resposta 4xx grava algo, então um reenvio corrigido do mesmo `eventId` é aceito.
 
+### Consulta (RF27, D14)
+
+`GET /issues/{owner}/{repo}/{number}` devolve o resultado da issue lendo `inbound.issue_presentation` (Modelo de dados), sem escrever em nada. `owner` e `repo` formam o `repository` (`owner/repo`); `number` é inteiro positivo.
+
+| Código | Corpo | Quando |
+|---|---|---|
+| 200 | corpo abaixo | existe `issue.created` aceito para o repositório e o número |
+| 404 | `{"error": "not_found"}` | nenhuma linha na view |
+| 422 | erro padrão do FastAPI | `number` não é inteiro positivo |
+| 503 | `{"error": "unavailable"}` | banco indisponível (mesmo corpo do webhook) |
+
+```json
+{
+  "repository": "equipe/projeto-teste",
+  "issueNumber": 42,
+  "eventId": "evt-001",
+  "status": "READY_TO_PUBLISH",
+  "statusReason": "proposal_validated",
+  "category": "bug",
+  "attempt": 1,
+  "manualAttempts": 0,
+  "proposal": {
+    "specialist": "bug",
+    "summary": "Erro 500 no envio do login.",
+    "nextStep": "Coletar o log do erro e os passos para reprodução.",
+    "conclusion": "procede",
+    "conclusionReason": "...",
+    "answer": null
+  },
+  "publication": {
+    "state": "PUBLISHED",
+    "commentUrl": "https://github.com/equipe/projeto-teste/issues/42#issuecomment-1",
+    "publishedAt": "2026-10-22T12:00:09Z"
+  }
+}
+```
+
+Regras: nomes em camelCase; `attempt` e `manualAttempts` vêm de `current_attempt` e `manual_attempts`. Antes da análise: `status = "ACCEPTED"`, `statusReason = "awaiting_analysis"`, `category`, `attempt`, `manualAttempts`, `proposal` e `publication` nulos. `proposal` é `null` quando a view não traz proposta válida (por exemplo `NEEDS_REVIEW` com `insufficient_content`, e o motivo fica em `statusReason`); `publication` é `null` quando não há publicação. `status` e `statusReason` seguem a combinação dos três donos da view (D16).
+
 ### Mensagem da fila `analysis`
 Fila durável `analysis`, mensagem persistente, `message_id` = `dedup_key`. Payload de um `issue.created`:
 ```json
@@ -190,7 +232,58 @@ CREATE TABLE inbound.inbound_outbox (
 CREATE INDEX inbound_outbox_pending ON inbound.inbound_outbox (id) WHERE published_at IS NULL;
 ```
 
-`inbound.issue_review_history` e a view `inbound.issue_presentation` pertencem às specs de revisão e de consulta e ficam fora deste plano.
+`inbound.issue_review_history` pertence à Revisão Humana Spec e fica fora deste plano. A view `inbound.issue_presentation` é criada na Etapa 11 (RF27), conforme a Modelagem de dados (seção "Consulta (RF27)"):
+
+```sql
+CREATE VIEW inbound.issue_presentation AS
+WITH first_event AS (
+  SELECT DISTINCT ON (repository, issue_number) *
+  FROM inbound.issue_events
+  WHERE type = 'issue.created'
+  ORDER BY repository, issue_number, received_at
+)
+SELECT
+  e.repository,
+  e.issue_number,
+  e.event_id,
+  CASE
+    WHEN c.id IS NULL THEN 'ACCEPTED'                         -- aceito, ainda não analisado
+    WHEN pub.state = 'FAILED' AND pub.revision = c.current_attempt
+         AND c.status = 'READY_TO_PUBLISH' THEN 'NEEDS_REVIEW'
+    ELSE c.status
+  END AS status,
+  CASE
+    WHEN c.id IS NULL THEN 'awaiting_analysis'
+    WHEN pub.state = 'FAILED' AND pub.revision = c.current_attempt
+         AND c.status = 'READY_TO_PUBLISH' THEN 'technical_failure'
+    ELSE c.status_reason
+  END AS status_reason,
+  c.category,
+  c.current_attempt,
+  c.manual_attempts,
+  p.specialist,
+  p.summary,
+  p.next_step,
+  p.conclusion,
+  p.conclusion_reason,
+  p.answer,
+  pub.state              AS publication_state,
+  pub.github_comment_url,
+  pub.published_at
+FROM first_event e
+LEFT JOIN triage.issue_cases c ON c.origin_event_id = e.event_id
+LEFT JOIN LATERAL (
+  SELECT pr.* FROM triage.proposals pr
+  JOIN triage.analysis_attempts a ON a.id = pr.attempt_id
+  WHERE a.case_id = c.id AND pr.validation_status = 'VALID'
+  ORDER BY a.attempt DESC LIMIT 1
+) p ON true
+LEFT JOIN LATERAL (
+  SELECT * FROM publisher.publications x
+  WHERE x.repository = e.repository AND x.issue_number = e.issue_number
+  ORDER BY x.revision DESC LIMIT 1
+) pub ON true;
+```
 
 ## Atividades
 
@@ -275,6 +368,16 @@ Requisitos: RNF01, RNF02, RNF16. Depende de: Etapas 7, 8 e 9.
 - [ ] (manual) Configurar o webhook no repositório de teste do GitHub apontando para o serviço por um túnel e com o segredo configurado.
 - [ ] (manual) Executar o trecho da entrada no roteiro da demonstração: parar o `issue-triage`, abrir uma issue, mostrar o 202 e a mensagem pendente; reenviar a entrega e mostrar o `200 duplicate`.
 
+### Etapa 11 — Consulta do resultado (RF27)
+Requisitos: RF27, RNF07, RNF16. Depende de: Etapas 2, 5 e 6, e das migrações de `triage` e `publisher` (plano do issue-triage, Etapa 13, inversão do compose). Pré-condição: decisões D14 a D16 validadas.
+- [ ] Criar `tests/fixtures/sql/triage_publisher_stub.sql` (D15) e aplicá-lo antes das migrações em `tests/conftest.py`, mantendo os testes existentes verdes.
+- [ ] Criar `migrations/0002_issue_presentation.sql` com a view de "Modelo de dados", sem escrever em nenhuma tabela de `triage` nem de `publisher` (RNF07).
+- [ ] Testes de integração da view: issue aceita sem caso (`ACCEPTED`, `awaiting_analysis`); caso em `ANALYZING`; `READY_TO_PUBLISH` com proposta válida e publicação `PUBLISHED` (URL e data); falha de publicação (`FAILED` com `revision = current_attempt`) vira `NEEDS_REVIEW (technical_failure)` e, com `revision` antiga, não vira (D16); `NEEDS_REVIEW (insufficient_content)` sem proposta; `MAX_RETRIES_REACHED`; só a proposta `VALID` mais recente aparece; repetição de `issue.created` não duplica linha.
+- [ ] `GET /issues/{owner}/{repo}/{number}` em `api/`, com leitura em `adapters/` pelo pool existente e modelo Pydantic camelCase, conforme "Contratos > Consulta" (D14): `404 not_found`, `422` e `503 unavailable` com a espera de `CONNECTION_TIMEOUT_S`.
+- [ ] Testes do endpoint: corpo exato em cada estado do item da view, 404, 422 e 503 com o banco parado; o `links.result` devolvido pelo `POST /webhooks/github` leva a um `200` com `status = "ACCEPTED"` para a mesma issue.
+- [ ] README: como consultar o resultado (exemplo de `curl`), que a migração `0002` exige os schemas `triage` e `publisher` migrados (compose integrado do `issue-triage`, ou o stub) e o que é real ou simulado nos testes da consulta (RNF17).
+- [ ] (manual) No ambiente integrado: com o `issue-triage` parado, o `GET` mostra `ACCEPTED`; depois de retomar, mostra categoria, proposta e publicação; o caso sem informação suficiente mostra `NEEDS_REVIEW` com o motivo (evidência do RF27 na demonstração).
+
 ## Pontos em aberto
 
 Divergências entre documentos e lacunas que bloqueiam etapas. Cada decisão tomada aqui deve voltar para a Entrada de issues, a Modelagem de dados e o High Level Design.
@@ -284,7 +387,7 @@ Divergências entre documentos e lacunas que bloqueiam etapas. Cada decisão tom
 | P1 | Mensagem de `issue.edited` | **Decidido pelo usuário em 2026-11-12, seguindo a Ingestão Spec:** toda edição válida é gravada; se a issue já tem `issue.created`, vai para a fila `analysis` com `attempt` nulo, `trigger = author_edit` e `triggerRef` = delivery id (formato em "Contratos > Mensagem da fila `analysis`"); o `issue-triage` decide se a edição reabre a análise. High Level Design (seção 3.2) e Modelagem de dados corrigidos em 2026-11-12 (inclui o índice `triage.analysis_attempts_one_per_edit`). Situação original: a Ingestão Spec dizia que o `issue-triage` decide; o High Level Design e a Modelagem de dados diziam que o `issue-analyst-api` filtra e produz `attempt + 1` | Etapa 9 |
 | P2 | Nomes das tabelas | A Entrada de issues usa `ingested_events`, `outbox` e o índice `ingested_events_one_created_per_issue`; a Modelagem de dados usa `inbound.issue_events`, `inbound.inbound_outbox` e `issue_events_one_created_per_issue`. Este plano segue a Modelagem de dados, que é a referência das colunas | — (corrigir a Entrada de issues) |
 | P3 | Coluna `missing_description` | Citada na Entrada de issues e ausente no DDL da Modelagem de dados. Este plano deriva `missingDescription` de `description = ''`, sem coluna | — (corrigir a Entrada de issues) |
-| P5 | Papéis e permissões do banco | O `GRANT` e o papel `analyst_api` da Modelagem de dados atravessam serviços; o compose que sobe os três serviços fica no repositório do `issue-triage` (ADR-0001, 2026-11-17), com os papéis e `GRANT` no initdb (`infra/initdb/00_roles.sql`, plano do issue-triage, Etapa 13) | Não bloqueia: este plano usa o compose local e `DATABASE_URL` |
+| P5 | Papéis e permissões do banco | O `GRANT` e o papel `analyst_api` da Modelagem de dados atravessam serviços; o compose que sobe os três serviços fica no repositório do `issue-triage` (ADR-0001, 2026-11-17), com os papéis e `GRANT` no initdb (`infra/initdb/00_roles.sql`, plano do issue-triage, Etapa 13) | Não bloqueia as Etapas 1 a 10: este plano usa o compose local e `DATABASE_URL`. A Etapa 11 testa com stubs de `triage` e `publisher`, e a conferência manual dela exige o compose integrado |
 
 ### Pontos decididos
 
@@ -294,8 +397,8 @@ Divergências entre documentos e lacunas que bloqueiam etapas. Cada decisão tom
 
 ## Fora do escopo
 
-API de consulta (RF27) e a view `inbound.issue_presentation`, endpoint de resolução da revisão humana e `inbound.issue_review_history`, transições de status, limpeza de dados antigos, autenticação do endpoint de revisão.
+Endpoint de resolução da revisão humana e `inbound.issue_review_history`, transições de status, limpeza de dados antigos, autenticação do endpoint de revisão.
 
 ## Limitações assumidas
 
-A ingestão depende do banco (com 503 o reenvio é manual, porque o GitHub não reenvia); descrição acima de 500 caracteres é recusada; sem limpeza de `raw_payload` e do outbox publicado; a entrada protege contra a parada da análise, não contra a queda da infraestrutura.
+A ingestão depende do banco (com 503 o reenvio é manual, porque o GitHub não reenvia); descrição acima de 500 caracteres é recusada; sem limpeza de `raw_payload` e do outbox publicado; a consulta lê a view a cada chamada, sem cache, e só funciona com `triage` e `publisher` migrados; a entrada protege contra a parada da análise, não contra a queda da infraestrutura.
