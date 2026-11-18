@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from issue_analyst_api.adapters.database import close_pool, create_pool, open_pool
 from issue_analyst_api.adapters.outbox_relay import OutboxRelay
-from issue_analyst_api.api import webhooks
+from issue_analyst_api.api import issues, webhooks
 from issue_analyst_api.config import Settings
 
 
@@ -45,5 +45,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(webhooks.router)
+    app.include_router(issues.router)
 
     return app

@@ -26,8 +26,7 @@ from testcontainers.postgres import PostgresContainer
 from issue_analyst_api.adapters.outbox_relay import ANALYSIS_QUEUE
 from issue_analyst_api.api.app import create_app
 from issue_analyst_api.config import Settings
-from issue_analyst_api.migrate import apply_migrations
-from tests.conftest import load_send_event_script, rabbitmq_url_of
+from tests.conftest import load_send_event_script, migrate_with_stub, rabbitmq_url_of
 
 SECRET = "e2e-test-secret"
 TIMEOUT_S = 30.0
@@ -223,7 +222,7 @@ def test_database_down_returns_503_and_stores_nothing(rabbitmq_url: str) -> None
 
     with database:
         database_url = database.get_connection_url()
-        apply_migrations(database_url)
+        migrate_with_stub(database_url)
         with _running_service(database_url, rabbitmq_url) as url:
             database.get_wrapped_container().stop()
             status, body = _send(url, event_id, repository, number)

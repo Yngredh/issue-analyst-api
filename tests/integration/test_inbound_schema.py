@@ -9,6 +9,7 @@ from testcontainers.postgres import PostgresContainer
 from issue_analyst_api.api.app import create_app
 from issue_analyst_api.config import Settings
 from issue_analyst_api.migrate import apply_migrations
+from tests.conftest import apply_triage_publisher_stub
 
 INSERT_EVENT = """
 INSERT INTO inbound.issue_events
@@ -49,8 +50,7 @@ def test_tables_and_indexes_created(db_conn: psycopg.Connection) -> None:
     assert "inbound_outbox_pending" in indexes
     assert "WHERE (published_at IS NULL)" in indexes["inbound_outbox_pending"]
     assert any(
-        "(repository, issue_number, received_at)" in definition
-        for definition in indexes.values()
+        "(repository, issue_number, received_at)" in definition for definition in indexes.values()
     )
     assert any(
         "inbound_outbox" in definition and "(topic, dedup_key)" in definition
@@ -74,24 +74,52 @@ def test_check_rejects_blank_title(db_conn: psycopg.Connection) -> None:
         _insert_event(db_conn, issue_number=20, title="   ")
 
 
-def test_migration_runner_is_idempotent(postgres_container: PostgresContainer) -> None:
-    # Banco novo e vazio, para ver a primeira aplicação e a repetição.
+def _new_database(postgres_container: PostgresContainer) -> str:
+    """Cria um banco novo e vazio no contêiner da sessão e devolve a URL dele."""
     admin_url = postgres_container.get_connection_url()
     db_name = f"migrate_{uuid.uuid4().hex[:8]}"
     with psycopg.connect(admin_url, autocommit=True) as admin:
         admin.execute(f"CREATE DATABASE {db_name}")
-    url = admin_url.rsplit("/", 1)[0] + f"/{db_name}"
+    return admin_url.rsplit("/", 1)[0] + f"/{db_name}"
 
-    assert apply_migrations(url) == ["0001"]
+
+def test_migration_runner_is_idempotent(postgres_container: PostgresContainer) -> None:
+    # Banco novo e vazio, para ver a primeira aplicação e a repetição. A 0002 exige os schemas
+    # `triage` e `publisher`, criados pelo stub (D15).
+    url = _new_database(postgres_container)
+    apply_triage_publisher_stub(url)
+
+    assert apply_migrations(url) == ["0001", "0002"]
     assert apply_migrations(url) == []
 
     with psycopg.connect(url) as conn:
-        versions = conn.execute("SELECT version FROM inbound.schema_migrations").fetchall()
+        versions = conn.execute(
+            "SELECT version FROM inbound.schema_migrations ORDER BY version"
+        ).fetchall()
         tables = conn.execute(
-            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'inbound'"
+            "SELECT count(*) FROM information_schema.tables"
+            " WHERE table_schema = 'inbound' AND table_type = 'BASE TABLE'"
         ).fetchone()
-    assert versions == [("0001",)]
+        views = conn.execute(
+            "SELECT table_name FROM information_schema.views WHERE table_schema = 'inbound'"
+        ).fetchall()
+    assert versions == [("0001",), ("0002",)]
     assert tables == (3,)
+    assert views == [("issue_presentation",)]
+
+
+def test_view_migration_is_strict_without_triage_and_publisher(
+    postgres_container: PostgresContainer,
+) -> None:
+    # Sem os schemas `triage` e `publisher`, a 0002 falha e não fica registrada (D15).
+    url = _new_database(postgres_container)
+
+    with pytest.raises(errors.UndefinedTable):
+        apply_migrations(url)
+
+    with psycopg.connect(url) as conn:
+        versions = conn.execute("SELECT version FROM inbound.schema_migrations").fetchall()
+    assert versions == [("0001",)]
 
 
 async def test_lifespan_opens_and_closes_pool(database_url: str) -> None:

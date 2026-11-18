@@ -14,9 +14,26 @@ from testcontainers.postgres import PostgresContainer
 
 from issue_analyst_api.migrate import apply_migrations
 
+# Cópia literal do DDL de `triage` e `publisher` lido pela view (D15); nunca vai para `migrations/`.
+TRIAGE_PUBLISHER_STUB = (
+    Path(__file__).resolve().parent / "fixtures" / "sql" / "triage_publisher_stub.sql"
+)
+
 if sys.platform == "win32":
     # O psycopg assíncrono não funciona com o ProactorEventLoop, padrão no Windows.
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+def apply_triage_publisher_stub(database_url: str) -> None:
+    """Cria as tabelas de `triage` e `publisher` lidas pela view, antes das migrações (D15)."""
+    with psycopg.connect(database_url) as conn:
+        conn.execute(TRIAGE_PUBLISHER_STUB.read_text(encoding="utf-8"))
+
+
+def migrate_with_stub(database_url: str) -> list[str]:
+    """Aplica o stub de `triage` e `publisher` e depois as migrações do serviço."""
+    apply_triage_publisher_stub(database_url)
+    return apply_migrations(database_url)
 
 
 @pytest.fixture(scope="session")
@@ -28,9 +45,9 @@ def postgres_container() -> Iterator[PostgresContainer]:
 
 @pytest.fixture(scope="session")
 def database_url(postgres_container: PostgresContainer) -> str:
-    """URL do PostgreSQL da sessão, com as migrações já aplicadas."""
+    """URL do PostgreSQL da sessão, com o stub de `triage` e `publisher` e as migrações."""
     url = postgres_container.get_connection_url()
-    apply_migrations(url)
+    migrate_with_stub(url)
     return url
 
 

@@ -37,6 +37,16 @@ schema `inbound`; as já aplicadas ficam em `inbound.schema_migrations` e não r
 uv run python -m issue_analyst_api.migrate
 ```
 
+A migração `0002_issue_presentation.sql` cria a view `inbound.issue_presentation`, que lê tabelas
+dos schemas `triage` e `publisher`. Ela é estrita: falha (e não fica registrada) se esses schemas
+ainda não foram migrados. Rode o `migrate` depois das migrações do `issue-triage` e do
+`issue-publisher` (o compose integrado do `issue-triage` já faz nessa ordem). Fora dele, aplique
+antes o stub dos testes, só em banco local de desenvolvimento:
+
+```bash
+psql "$DATABASE_URL" -f tests/fixtures/sql/triage_publisher_stub.sql
+```
+
 ## Iniciar o serviço
 
 ```bash
@@ -78,6 +88,25 @@ Argumentos: `--action` (`opened` ou `edited`), `--repository` (`owner/name`), `-
 `http://localhost:8000/webhooks/github`). Sem consumidor (`issue-triage` parado), a mensagem fica
 pendente na fila `analysis`, visível no painel do RabbitMQ (http://localhost:15672, `guest`/`guest`).
 
+## Consultar o resultado
+
+`GET /issues/{owner}/{repo}/{number}` devolve o resultado da issue lido da view
+`inbound.issue_presentation` (status combinado da entrada, do `issue-triage` e do
+`issue-publisher`), sem escrever nada e sem autenticação. É o endereço de `links.result` do 202.
+
+```bash
+curl http://localhost:8000/issues/equipe/projeto-teste/42
+# 200 {"repository": "equipe/projeto-teste", "issueNumber": 42, "eventId": "evt-001",
+#      "status": "ACCEPTED", "statusReason": "awaiting_analysis", "category": null,
+#      "attempt": null, "manualAttempts": null, "proposal": null, "publication": null}
+```
+
+Antes da análise, `status = ACCEPTED` e `statusReason = awaiting_analysis`; depois, a categoria,
+a proposta válida mais recente e a publicação. Uma falha permanente da publicação da revisão atual
+aparece como `NEEDS_REVIEW` com `technical_failure`. Issue sem `issue.created` aceito → `404
+{"error": "not_found"}`; número não inteiro positivo → `422`; banco indisponível → `503
+{"error": "unavailable"}`.
+
 ## Testes
 
 ```bash
@@ -86,6 +115,8 @@ uv run ruff check . && uv run pytest -q
 
 O Docker precisa estar rodando: os testes de integração sobem PostgreSQL (`postgres:16`) e
 RabbitMQ (`rabbitmq:3-management`) com testcontainers. Nenhum teste chama o GitHub ou a Anthropic.
+Antes das migrações, os testes aplicam `tests/fixtures/sql/triage_publisher_stub.sql`, que cria
+só as tabelas de `triage` e `publisher` lidas pela view (o stub nunca vai para `migrations/`).
 
 | Testes | Real | Simulado |
 |---|---|---|
@@ -93,10 +124,12 @@ RabbitMQ (`rabbitmq:3-management`) com testcontainers. Nenhum teste chama o GitH
 | `tests/unit/test_health.py`, `test_webhook_endpoint.py`, `test_webhook_validation_table.py`, `test_webhook_logging.py` | aplicação FastAPI pelo `TestClient`, assinatura e validação | banco e broker apontam para endereços inacessíveis; nos testes do webhook, a gravação no banco é trocada por um falso |
 | `tests/unit/test_outbox_relay_logging.py` | relay e seus logs | conexão ao broker e ao banco roteirizadas |
 | `tests/unit/test_send_event_script.py` | montagem do payload, headers e assinatura do script | o envio HTTP não acontece |
-| `tests/integration/test_inbound_schema.py` | PostgreSQL e migrações | — |
+| `tests/integration/test_inbound_schema.py` | PostgreSQL e migrações | schemas `triage` e `publisher` criados pelo stub `tests/fixtures/sql/triage_publisher_stub.sql` |
+| `tests/integration/test_issue_presentation_view.py` | PostgreSQL, migrações e a view `inbound.issue_presentation` | as tabelas de `triage` e `publisher` são o stub (cópia literal do DDL da Modelagem de dados); as linhas delas são gravadas pelo próprio teste, no papel do `issue-triage` e do `issue-publisher` |
+| `tests/integration/test_issue_result_endpoint.py` | aplicação pelo `TestClient`, PostgreSQL e a view; o `links.result` do webhook | `triage` e `publisher` como no teste da view; broker inacessível; banco parado simulado por URL inacessível |
 | `tests/integration/test_issue_events_persistence.py`, `test_deduplication.py`, `test_issue_edited.py` | aplicação pelo `TestClient` e PostgreSQL | broker inacessível (o relay não publica); banco parado simulado por URL inacessível |
 | `tests/integration/test_outbox_relay.py` | relay, aplicação pelo `TestClient`, PostgreSQL e RabbitMQ (incluindo parar e religar o broker) | um dos testes usa broker inacessível por URL; a queda entre publicar e marcar é forçada por uma subclasse do relay |
-| `tests/integration/test_end_to_end.py` | serviço no uvicorn numa porta local, PostgreSQL, RabbitMQ e envio HTTP pelo script; broker e banco parados e religados de verdade | o GitHub (o script faz o papel dele); não há consumidor da fila `analysis` (`issue-triage` parado) |
+| `tests/integration/test_end_to_end.py` | serviço no uvicorn numa porta local, PostgreSQL, RabbitMQ e envio HTTP pelo script; broker e banco parados e religados de verdade | o GitHub (o script faz o papel dele); não há consumidor da fila `analysis` (`issue-triage` parado); schemas `triage` e `publisher` pelo stub |
 
 ## Documentação
 
