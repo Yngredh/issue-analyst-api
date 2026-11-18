@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from issue_analyst_api.adapters.issue_events import (
     DatabaseUnavailableError,
-    store_issue_created,
+    store_issue_event,
 )
 from issue_analyst_api.config import Settings
 from issue_analyst_api.domain.events import (
@@ -69,8 +69,8 @@ async def receive_github_webhook(request: Request) -> Response:
     """Recebe a entrega do GitHub: limite de tamanho → assinatura → JSON → filtro → normalização
     → transação (evento + outbox).
 
-    `issue.created` novo → `202 accepted`; já recebido → `200 duplicate`; banco fora → `503`.
-    `issue.edited` válido responde `501` (provisório) até a Etapa 9.
+    `issue.created` ou `issue.edited` novo → `202 accepted`; já recebido → `200 duplicate`;
+    banco fora → `503`.
 
     Cada resposta gera um único log `webhook_response` com o código HTTP, a decisão e o motivo.
     O `eventId` fica no contexto do structlog durante a requisição e sai dele no fim.
@@ -148,11 +148,8 @@ async def _process(request: Request) -> _Outcome:
     if isinstance(result, ValidationFailure):
         return _validation_rejected(result)
 
-    if result.type == "issue.edited":
-        return _rejected(501, "not_implemented")  # provisório até a Etapa 9
-
     try:
-        duplicate = await store_issue_created(request.app.state.db_pool, result, payload, body)
+        duplicate = await store_issue_event(request.app.state.db_pool, result, payload, body)
     except DatabaseUnavailableError:
         return _rejected(503, "unavailable", {"error": "unavailable"})
 

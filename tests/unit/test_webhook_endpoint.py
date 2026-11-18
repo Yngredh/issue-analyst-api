@@ -60,7 +60,7 @@ def _fake_store(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_store(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(webhooks, "store_issue_created", fake_store)
+    monkeypatch.setattr(webhooks, "store_issue_event", fake_store)
 
 
 @pytest.fixture
@@ -171,7 +171,7 @@ def test_not_inserted_returns_200_duplicate_with_reason_event_id_and_state(
     async def already_stored(*_args: object, **_kwargs: object) -> Duplicate:
         return Duplicate(reason, "ACCEPTED")
 
-    monkeypatch.setattr(webhooks, "store_issue_created", already_stored)
+    monkeypatch.setattr(webhooks, "store_issue_event", already_stored)
 
     response = _post(client, VALID_BODY, _sign(VALID_BODY))
 
@@ -190,7 +190,7 @@ def test_database_unavailable_returns_503(
     async def unavailable(*_args: object, **_kwargs: object) -> bool:
         raise DatabaseUnavailableError
 
-    monkeypatch.setattr(webhooks, "store_issue_created", unavailable)
+    monkeypatch.setattr(webhooks, "store_issue_event", unavailable)
 
     response = _post(client, VALID_BODY, _sign(VALID_BODY))
 
@@ -198,19 +198,25 @@ def test_database_unavailable_returns_503(
     assert response.json() == {"error": "unavailable"}
 
 
-def test_edited_issue_returns_provisional_501_without_storing(
+def test_edited_issue_is_stored_and_returns_202_with_result_link(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[object] = []
+    calls: list[tuple[object, ...]] = []
 
     async def spy(*args: object, **_kwargs: object) -> None:
         calls.append(args)
         return None
 
-    monkeypatch.setattr(webhooks, "store_issue_created", spy)
+    monkeypatch.setattr(webhooks, "store_issue_event", spy)
     body = VALID_BODY.replace(b'"opened"', b'"edited"')
 
     response = _post(client, body, _sign(body))
 
-    assert response.status_code == 501
-    assert calls == []
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "accepted",
+        "eventId": "evt-001",
+        "links": {"result": "/issues/acme/app/1"},
+    }
+    assert len(calls) == 1
+    assert calls[0][1].type == "issue.edited"

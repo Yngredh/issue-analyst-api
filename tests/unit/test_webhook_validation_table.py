@@ -1,7 +1,7 @@
 """Cada linha da tabela de Validação da Entrada de issues, pelo endpoint (RF02 a RF05, RF28).
 
 A gravação no banco é substituída por um falso; a persistência real é coberta pelos testes de
-integração. `issue.edited` válido ainda responde o `501` provisório (até a Etapa 9).
+integração.
 """
 
 import hashlib
@@ -47,7 +47,7 @@ def _fake_store(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_store(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(webhooks, "store_issue_created", fake_store)
+    monkeypatch.setattr(webhooks, "store_issue_event", fake_store)
 
 
 @pytest.fixture
@@ -191,8 +191,7 @@ def _accepted_event(client: TestClient, payload: dict[str, Any], **kwargs: Any) 
 
     assert len(captured) == 1
     assert isinstance(captured[0], NormalizedIssueEvent)
-    expected_status = 202 if captured[0].type == "issue.created" else 501  # 501 até a Etapa 9
-    assert response.status_code == expected_status
+    assert response.status_code == 202
     return captured[0]
 
 

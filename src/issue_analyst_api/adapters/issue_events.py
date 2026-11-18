@@ -1,7 +1,9 @@
-"""Persistência transacional do evento aceito com a mensagem da outbox (RF07, RNF05, RNF07).
+"""Persistência transacional do evento aceito com a mensagem da outbox (RF07, RF28, RNF05, RNF07).
 
 O evento e a mensagem da fila `analysis` são gravados na mesma transação: ou os dois ficam
 gravados, ou nenhum. A publicação no broker é feita depois, pelo relay da outbox.
+A entrada não lê o schema `triage`: quem decide se uma edição reabre a análise é o
+`issue-triage`.
 """
 
 import hashlib
@@ -18,6 +20,7 @@ from issue_analyst_api.domain.events import NormalizedIssueEvent
 
 ANALYSIS_TOPIC = "analysis"
 INITIAL_ATTEMPT = 1
+EDIT_TRIGGER = "author_edit"
 
 # `occurred_at` recebe o mesmo instante de `received_at` quando o normalizado vem sem
 # `occurredAt` (fallback da D12): `now()` é fixo durante a transação.
@@ -48,6 +51,13 @@ SELECT status, body_hash FROM inbound.issue_events WHERE event_id = %(event_id)s
 
 _SELECT_CREATED_BY_ISSUE = """
 SELECT status FROM inbound.issue_events
+WHERE repository = %(repository)s AND issue_number = %(issue_number)s AND type = 'issue.created'
+"""
+
+
+# `issue.created` da mesma issue, lido na transação da edição para achar o `origin_event_id`.
+_SELECT_ORIGIN_EVENT_ID = """
+SELECT event_id FROM inbound.issue_events
 WHERE repository = %(repository)s AND issue_number = %(issue_number)s AND type = 'issue.created'
 """
 
@@ -86,15 +96,51 @@ def analysis_message(event_id: str) -> dict[str, Any]:
     }
 
 
-async def _insert_outbox(conn: psycopg.AsyncConnection, event_id: str) -> None:
+def edit_message(origin_event_id: str, delivery_id: str) -> dict[str, Any]:
+    """Payload da mensagem de edição da fila `analysis` (P1, "Contratos > Mensagem da fila")."""
+    return {
+        "eventId": origin_event_id,
+        "attempt": None,
+        "trigger": EDIT_TRIGGER,
+        "triggerRef": delivery_id,
+    }
+
+
+async def _insert_outbox(
+    conn: psycopg.AsyncConnection, event_id: str, dedup_key: str, payload: dict[str, Any]
+) -> None:
     await conn.execute(
         _INSERT_OUTBOX,
         {
             "event_id": event_id,
             "topic": ANALYSIS_TOPIC,
-            "dedup_key": f"{event_id}:{INITIAL_ATTEMPT}",
-            "payload": Jsonb(analysis_message(event_id)),
+            "dedup_key": dedup_key,
+            "payload": Jsonb(payload),
         },
+    )
+
+
+async def _insert_created_outbox(conn: psycopg.AsyncConnection, event_id: str) -> None:
+    await _insert_outbox(
+        conn, event_id, f"{event_id}:{INITIAL_ATTEMPT}", analysis_message(event_id)
+    )
+
+
+async def _insert_edited_outbox(conn: psycopg.AsyncConnection, event: NormalizedIssueEvent) -> None:
+    """Grava a mensagem de edição só se a issue já tem `issue.created`; senão, nada (P1)."""
+    cursor = await conn.execute(
+        _SELECT_ORIGIN_EVENT_ID,
+        {"repository": event.repository, "issue_number": event.issue_number},
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return
+    origin_event_id = row[0]
+    await _insert_outbox(
+        conn,
+        origin_event_id,
+        f"{origin_event_id}:edit:{event.event_id}",
+        edit_message(origin_event_id, event.event_id),
     )
 
 
@@ -127,17 +173,20 @@ async def _find_conflict(
     return Duplicate(DuplicateReason.DUPLICATE_ISSUE, row[0])
 
 
-async def store_issue_created(
+async def store_issue_event(
     pool: AsyncConnectionPool,
     event: NormalizedIssueEvent,
     raw_payload: dict[str, Any],
     raw_body: bytes,
 ) -> Duplicate | None:
-    """Grava o `issue.created` e a mensagem da outbox numa única transação.
+    """Grava o evento (`issue.created` ou `issue.edited`) e a mensagem da outbox numa única
+    transação.
 
     `INSERT ... ON CONFLICT DO NOTHING` sem alvo: qualquer chave em conflito (mesmo `eventId` ou
     mesma issue) faz nada ser inserido, e decide sozinho quem é o primeiro em entregas
-    simultâneas. A outbox só é gravada se o evento foi inserido.
+    simultâneas. A outbox só é gravada se o evento foi inserido: `issue.created` grava a
+    mensagem inicial; `issue.edited` grava a mensagem de edição só se a issue já tem
+    `issue.created` (sem ele, a edição é só registrada).
     Devolve `None` se o evento foi inserido; se nada foi inserido, devolve o `Duplicate` com a
     chave que conflitou e o estado da linha gravada, sem gravar outbox (RF06).
     Levanta `DatabaseUnavailableError` se o banco não estiver acessível.
@@ -163,7 +212,10 @@ async def store_issue_created(
             )
             if await cursor.fetchone() is None:
                 return await _find_conflict(conn, event, received_body_hash)
-            await _insert_outbox(conn, event.event_id)
+            if event.type == "issue.edited":
+                await _insert_edited_outbox(conn, event)
+            else:
+                await _insert_created_outbox(conn, event.event_id)
             return None
     except psycopg.OperationalError as exc:  # inclui o PoolTimeout do psycopg_pool
         raise DatabaseUnavailableError from exc

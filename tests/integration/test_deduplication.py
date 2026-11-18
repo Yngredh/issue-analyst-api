@@ -21,7 +21,7 @@ from issue_analyst_api.adapters.database import close_pool, create_pool, open_po
 from issue_analyst_api.adapters.issue_events import (
     Duplicate,
     DuplicateReason,
-    store_issue_created,
+    store_issue_event,
 )
 from issue_analyst_api.api.app import create_app
 from issue_analyst_api.config import Settings
@@ -259,7 +259,7 @@ async def test_concurrent_deliveries_of_same_event_id_store_one_row_and_one_mess
     await open_pool(pool)
     try:
         results = await asyncio.gather(
-            *(store_issue_created(pool, event, raw_payload, raw_body) for _ in range(8))
+            *(store_issue_event(pool, event, raw_payload, raw_body) for _ in range(8))
         )
     finally:
         await close_pool(pool)

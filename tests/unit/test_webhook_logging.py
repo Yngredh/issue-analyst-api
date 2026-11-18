@@ -73,7 +73,7 @@ def _returning(value: object) -> Callable[..., Awaitable[object]]:
 @pytest.fixture(autouse=True)
 def _fake_store(monkeypatch: pytest.MonkeyPatch) -> None:
     """Substitui a gravação no banco: estes testes cobrem só o log do caminho HTTP."""
-    monkeypatch.setattr(webhooks, "store_issue_created", _returning(None))
+    monkeypatch.setattr(webhooks, "store_issue_event", _returning(None))
 
 
 @pytest.fixture
@@ -134,11 +134,33 @@ def test_accepted_logs_one_decision_with_event_id(client: TestClient) -> None:
     ]
 
 
+def test_accepted_edit_logs_the_same_accepted_decision(client: TestClient) -> None:
+    body = _body(updated_at="2026-11-10T13:00:00Z").replace(b'"opened"', b'"edited"')
+
+    status, logs = _post_and_capture(client, body)
+
+    assert status == 202
+    assert _responses(logs) == [
+        {
+            "event": "webhook_response",
+            "log_level": "info",
+            "eventId": EVENT_ID,
+            "httpStatus": 202,
+            "decision": "accepted",
+            "reason": None,
+            "type": "issue.edited",
+            "repository": "acme/app",
+            "issueNumber": 7,
+            "missingDescription": False,
+        }
+    ]
+
+
 @pytest.mark.parametrize("reason", list(DuplicateReason))
 def test_duplicate_logs_decision_and_reason(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: DuplicateReason
 ) -> None:
-    monkeypatch.setattr(webhooks, "store_issue_created", _returning(Duplicate(reason, "ACCEPTED")))
+    monkeypatch.setattr(webhooks, "store_issue_event", _returning(Duplicate(reason, "ACCEPTED")))
 
     status, logs = _post_and_capture(client, _body())
 
@@ -257,7 +279,7 @@ def test_database_unavailable_logs_rejection(
     async def unavailable(*_args: object, **_kwargs: object) -> None:
         raise DatabaseUnavailableError
 
-    monkeypatch.setattr(webhooks, "store_issue_created", unavailable)
+    monkeypatch.setattr(webhooks, "store_issue_event", unavailable)
 
     status, logs = _post_and_capture(client, _body())
 
@@ -305,7 +327,7 @@ def test_logs_never_contain_secret_raw_body_title_or_description(
         _post(client, _body(created_at="ontem"))  # occurred_at_fallback + accepted
         monkeypatch.setattr(
             webhooks,
-            "store_issue_created",
+            "store_issue_event",
             _returning(Duplicate(DuplicateReason.DUPLICATE_EVENT, "ACCEPTED")),
         )
         _post(client, body)  # duplicate

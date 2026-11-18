@@ -18,7 +18,7 @@ from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
 from issue_analyst_api.adapters.database import close_pool, create_pool, open_pool
-from issue_analyst_api.adapters.issue_events import store_issue_created
+from issue_analyst_api.adapters.issue_events import store_issue_event
 from issue_analyst_api.api.app import create_app
 from issue_analyst_api.config import Settings
 from issue_analyst_api.domain.events import NormalizedIssueEvent
@@ -141,9 +141,7 @@ def test_accepted_event_writes_one_event_and_one_outbox_row(
     ]
 
 
-def test_empty_description_is_stored_as_empty_string(
-    client: TestClient, database_url: str
-) -> None:
+def test_empty_description_is_stored_as_empty_string(client: TestClient, database_url: str) -> None:
     repository, number = _unique_issue()
     event_id = f"evt-{uuid.uuid4()}"
     body = json.dumps(_payload(repository, number, body="   ")).encode()
@@ -193,20 +191,6 @@ def test_same_event_id_again_returns_duplicate_without_new_outbox_row(
         assert len(_outbox_rows(conn, event_id)) == 1
 
 
-def test_edited_issue_returns_501_and_writes_nothing(
-    client: TestClient, database_url: str
-) -> None:
-    repository, number = _unique_issue()
-    event_id = f"evt-{uuid.uuid4()}"
-    body = json.dumps(_payload(repository, number, action="edited")).encode()
-
-    assert _post(client, body, event_id).status_code == 501
-
-    with psycopg.connect(database_url) as conn:
-        assert _event_rows(conn, event_id) == []
-        assert _outbox_rows(conn, event_id) == []
-
-
 async def test_outbox_failure_rolls_back_event(database_url: str) -> None:
     repository, number = _unique_issue()
     event_id = f"evt-{uuid.uuid4()}"
@@ -232,7 +216,7 @@ async def test_outbox_failure_rolls_back_event(database_url: str) -> None:
     await open_pool(pool)
     try:
         with pytest.raises(errors.UniqueViolation):
-            await store_issue_created(pool, event, _payload(repository, number), b"{}")
+            await store_issue_event(pool, event, _payload(repository, number), b"{}")
     finally:
         await close_pool(pool)
 

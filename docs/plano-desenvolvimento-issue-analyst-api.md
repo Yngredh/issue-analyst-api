@@ -362,9 +362,9 @@ Requisitos: RNF14. Depende de: Etapas 6 e 7.
 
 ### Etapa 9 — Mensagem de issue.edited
 Requisitos: RF28 (entrada). Depende de: Etapa 6. Pré-condição: ponto em aberto P1 decidido e registrado neste plano (decidido em 2026-11-12).
-- [ ] Gravar o `issue.edited` aceito em `inbound.issue_events` e, na mesma transação, se existir `issue.created` da mesma issue, gravar em `inbound.inbound_outbox` a mensagem de "Contratos > Mensagem da fila `analysis`" para edição (`event_id = origin_event_id`, `attempt` nulo, `trigger = author_edit`, `triggerRef` = delivery id, `dedup_key = '<origin_event_id>:edit:<delivery id>'`). Sem `issue.created`, só grava o evento. Não ler o schema `triage`.
-- [ ] Substituir o `501` provisório do `issue.edited` pela resposta definitiva: `202 accepted` com `eventId` e `links.result` (D9), com ou sem mensagem.
-- [ ] Testes de integração: edição de issue com `issue.created` gravado (uma linha em cada tabela, payload e `dedup_key` exatos); edição sem `issue.created` (evento gravado, outbox vazia); reenvio do mesmo `issue.edited` (`duplicate_event`, sem nova mensagem); duas edições diferentes da mesma issue geram duas mensagens.
+- [x] Gravar o `issue.edited` aceito em `inbound.issue_events` e, na mesma transação, se existir `issue.created` da mesma issue, gravar em `inbound.inbound_outbox` a mensagem de "Contratos > Mensagem da fila `analysis`" para edição (`event_id = origin_event_id`, `attempt` nulo, `trigger = author_edit`, `triggerRef` = delivery id, `dedup_key = '<origin_event_id>:edit:<delivery id>'`). Sem `issue.created`, só grava o evento. Não ler o schema `triage`.
+- [x] Substituir o `501` provisório do `issue.edited` pela resposta definitiva: `202 accepted` com `eventId` e `links.result` (D9), com ou sem mensagem.
+- [x] Testes de integração: edição de issue com `issue.created` gravado (uma linha em cada tabela, payload e `dedup_key` exatos); edição sem `issue.created` (evento gravado, outbox vazia); reenvio do mesmo `issue.edited` (`duplicate_event`, sem nova mensagem); duas edições diferentes da mesma issue geram duas mensagens.
 
 ### Etapa 10 — Resiliência, script de envio e demonstração
 Requisitos: RNF01, RNF02, RNF16. Depende de: Etapas 7, 8 e 9.
