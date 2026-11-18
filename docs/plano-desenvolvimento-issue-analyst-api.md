@@ -57,7 +57,7 @@ Escolhas de implementação que os documentos não fecham. **Status: D1 a D5 val
 | D12 | Detalhes da normalização e validação (Etapa 4), **validada pelo usuário em 2026-11-10** | 1) `occurredAt` ausente, não string, fora de ISO 8601 ou sem fuso (não se assume UTC) **não recusa o evento**: o normalizado sai com `occurredAt = null` e `occurredAtFallback` = `missing` ou `invalid`, é registrado o log de warning `occurred_at_fallback` com o motivo, e a Etapa 5 grava em `occurred_at` o mesmo instante de `received_at` (a coluna continua NOT NULL); `occurredAt` nunca entra em `missing_fields` nem em `invalid_fields`. 2) `missing_event_id` responde `"fields": ["eventId"]`; só `invalid_payload` usa a lista vazia. 3) JSON válido que não é objeto → `400 invalid_payload` com `"fields": []`, antes do filtro. 4) Motivos de `ignored` avaliados na ordem da D7 (`ping` > `unsupported_event` > `unsupported_action` > `bot_sender`), e o filtro roda antes da exigência de `X-GitHub-Delivery`: um `ping` sem `X-GitHub-Delivery` responde `200 ignored`. 5) Descrição só com espaços é gravada como `""`; não string ou acima do limite → `invalid_fields`; os limites contam caracteres, não bytes. 6) `repository` no formato `owner/name` (uma barra, partes não vazias e sem espaços; ausente/`null` → `missing_fields`, vazio ou não string → `invalid_fields`); `issueNumber` aceito só com `type(v) is int` e ≥ 1 (`true`, `7.0`, `"7"` → `invalid_fields`); limites inclusivos (`<=`); ordem dos campos no erro: repository, issueNumber, title, description |
 | D13 | Detalhes da deduplicação (Etapa 6), **validada pelo usuário em 2026-11-12** | 1) Em `duplicate_issue`, `eventId` da resposta é o da entrega que acabou de chegar, não o do `issue.created` já gravado. 2) Estado atual = campo `"state": "ACCEPTED"` em texto (D10), lido da linha já gravada: em `duplicate_event`, a do mesmo `eventId`; em `duplicate_issue`, a do `issue.created` da issue. 3) Log `duplicate_mismatch` só em `duplicate_event` e só quando os hashes diferem: nível warning, campos `eventId`, `storedBodyHash` e `receivedBodyHash`; é um log extra, além do log de decisão da Etapa 8. 4) Na consulta feita depois do conflito, o `event_id` é verificado **primeiro** e só depois o par `repository + issue_number`: mesmo `eventId` e mesma issue ao mesmo tempo → `duplicate_event`. Com `ON CONFLICT DO NOTHING`, o PostgreSQL espera a transação concorrente terminar, então a consulta sempre encontra a linha vencedora |
 | D14 | Contrato da consulta (RF27), **validada pelo usuário em 2026-11-18** | `GET /issues/{owner}/{repo}/{number}` lê `inbound.issue_presentation` com `repository = '<owner>/<repo>'` e `issue_number`; somente leitura e sem autenticação; é o endereço de `links.result` do 202 (D9). Resposta, códigos e regras de `null` em "Contratos > Consulta". A seção correspondente entra na Ingestão Spec ("Consulta (RF27)"), que é a spec dos endpoints de apresentação do `issue-analyst-api` |
-| D15 | Criação da view e testes (Etapa 11), **validada pelo usuário em 2026-11-18** | A view é criada pela migração `0002_issue_presentation.sql`, que lê tabelas de `triage` e `publisher`. A migração é estrita (falha se elas não existirem), então só roda depois das migrações dos outros dois, como no compose integrado (plano do issue-triage, Etapa 13, P2 e P5). Nos testes, `tests/fixtures/sql/triage_publisher_stub.sql` (cópia literal do DDL de `triage.issue_cases`, `triage.analysis_attempts`, `triage.proposals` e `publisher.publications` da Modelagem de dados) é aplicado antes das migrações e nunca vai para `migrations/`. Fora do compose integrado, rodar o `migrate` exige o stub ou os dois schemas já migrados. Conferida com a D32 e a D33 do plano do issue-triage: no compose integrado o `analyst_api` migra como o próprio papel, lê `triage` e `publisher` por `ALTER DEFAULT PRIVILEGES` e só sobe depois dos dois workers saudáveis |
+| D15 | Criação da view e testes (Etapa 11), **validada pelo usuário em 2026-11-18** | A view é criada pela migração `0002_issue_presentation.sql`, que lê tabelas de `triage` e `publisher`. A migração é estrita (falha se elas não existirem), então só roda depois das migrações dos outros dois, como no compose integrado (plano do issue-triage, Etapa 13, P2 e P5). Nos testes, `tests/fixtures/sql/triage_publisher_stub.sql` (cópia literal do DDL de `triage.issue_cases`, `triage.analysis_attempts`, `triage.proposals` e `publisher.publications` da Modelagem de dados), que está na seção "Tabelas de `triage` e `publisher` lidas pela view" deste plano é aplicado antes das migrações e nunca vai para `migrations/`. Fora do compose integrado, rodar o `migrate` exige o stub ou os dois schemas já migrados. Conferida com a D32 e a D33 do plano do issue-triage: no compose integrado o `analyst_api` migra como o próprio papel, lê `triage` e `publisher` por `ALTER DEFAULT PRIVILEGES` e só sobe depois dos dois workers saudáveis |
 | D16 | Status combinado na leitura (decisão 3 da Modelagem de dados), **validada pelo usuário em 2026-11-18** | A falha permanente de publicação aparece como `NEEDS_REVIEW (technical_failure)` só na view: `publications.state = 'FAILED'` com `revision = current_attempt` e caso em `READY_TO_PUBLISH`. Sem escrita cruzada e sem mudança de código no `issue-triage` nem no `issue-publisher`: a regra vive na migração da Etapa 11 e é coberta por teste. O endpoint de resolução (fora deste plano) reaproveitará a mesma regra |
 
 **Decisões aprovadas pelo usuário em 2026-11-10 (tomadas na Etapa 1):**
@@ -291,6 +291,109 @@ LEFT JOIN LATERAL (
 ) pub ON true;
 ```
 
+### Tabelas de `triage` e `publisher` lidas pela view (cópia literal da Modelagem de dados, D15)
+
+Só para o stub dos testes (`tests/fixtures/sql/triage_publisher_stub.sql`): as quatro tabelas que a view lê, na ordem de criação, com os schemas. Copiar sem alterar tipos, restrições, chaves nem índices; nunca vai para `migrations/`. As demais tabelas desses schemas (`triage.route_decisions`, `triage.publish_outbox`, `publisher.publication_tries`) a view não lê e ficam fora do stub.
+
+```sql
+CREATE SCHEMA triage;
+CREATE SCHEMA publisher;
+
+CREATE TABLE triage.issue_cases (
+  id               bigserial PRIMARY KEY,
+  repository       text NOT NULL,
+  issue_number     int  NOT NULL,
+  origin_event_id  text NOT NULL UNIQUE,           -- primeiro issue.created da issue
+  status           text NOT NULL CHECK (status IN (
+                     'ANALYZING', 'NEEDS_REVIEW', 'MAX_RETRIES_REACHED',
+                     'READY_TO_PUBLISH', 'CANCELLED', 'FINISHED')),
+  status_reason    text NOT NULL,                  -- motivo do status (combinação no CHECK abaixo)
+  category         text CHECK (category IN ('bug', 'melhoria', 'duvida', 'indeterminado')),
+  current_attempt  int NOT NULL DEFAULT 1 CHECK (current_attempt >= 1),
+  manual_attempts  int NOT NULL DEFAULT 0 CHECK (manual_attempts >= 0),  -- limite: MAX_MANUAL_ATTEMPTS
+  closed_by_review_id  bigint,                 -- inbound.issue_review_history.id
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (repository, issue_number),               -- um caso por issue
+  CHECK (
+    (status = 'ANALYZING'              AND status_reason IN ('initial', 'author_edit', 'enrich', 'reprocess'))
+    OR (status = 'READY_TO_PUBLISH'    AND status_reason = 'empty_description')
+    OR (status = 'READY_TO_PUBLISH'    AND status_reason = 'proposal_validated')
+    OR (status = 'NEEDS_REVIEW'        AND status_reason IN ('unknown_repo', 'insufficient_content',
+                                                           'invalid_proposal', 'technical_failure'))
+    OR (status = 'MAX_RETRIES_REACHED' AND status_reason = 'manual_attempts_exhausted')
+    OR (status IN ('CANCELLED', 'FINISHED') AND status_reason = 'closed_by_reviewer')
+  ),
+  CHECK (status NOT IN ('CANCELLED', 'FINISHED') OR closed_by_review_id IS NOT NULL)
+);
+
+CREATE TABLE triage.analysis_attempts (
+  id           bigserial PRIMARY KEY,
+  case_id      bigint NOT NULL REFERENCES triage.issue_cases (id),
+  event_id     text NOT NULL,                      -- origin_event_id do caso
+  attempt      int  NOT NULL CHECK (attempt >= 1),
+  trigger      text NOT NULL CHECK (trigger IN ('initial', 'author_edit', 'enrich', 'reprocess')),
+  trigger_ref  text,                               -- eventId do issues.edited ou id da resolução
+  state        text NOT NULL CHECK (state IN ('IN_PROGRESS', 'DONE')),
+  outcome      text,                               -- status do caso ao terminar a tentativa
+  error        text,                               -- motivo da falha da tentativa, técnica ou do modelo
+  started_at   timestamptz NOT NULL DEFAULT now(),
+  finished_at  timestamptz,
+  UNIQUE (event_id, attempt)                       -- chave de deduplicação da fila analysis
+);
+
+CREATE UNIQUE INDEX analysis_attempts_one_per_edit  -- reentrega da mesma edição não abre outra tentativa
+  ON triage.analysis_attempts (event_id, trigger_ref) WHERE trigger = 'author_edit';
+
+CREATE TABLE triage.proposals (
+  id                 bigserial PRIMARY KEY,
+  attempt_id         bigint NOT NULL UNIQUE REFERENCES triage.analysis_attempts (id),
+  kind               text NOT NULL CHECK (kind IN ('triage', 'missing_info')),
+  specialist         text CHECK (specialist IN ('bug', 'melhoria', 'dominio')),
+  category           text CHECK (category IN ('bug', 'melhoria', 'duvida')),
+  summary            text,
+  next_step          text,                         -- próximo passo sugerido (RF16)
+  conclusion         text CHECK (conclusion IN ('procede', 'nao_procede', 'sem_informacao')),
+  conclusion_reason  text,                         -- por que o relato procede ou não
+  answer             text,                         -- só no especialista de domínio
+  evidence           jsonb NOT NULL DEFAULT '[]',  -- trechos do evento ou do catálogo
+  tool_calls         jsonb NOT NULL DEFAULT '[]',  -- ferramenta, argumentos, duração, chamada 1 ou 2 (RNF11)
+  raw_output         jsonb,                        -- lista com a saída bruta de cada chamada e o motivo da reprovação (RF31)
+  validation_status  text NOT NULL CHECK (validation_status IN ('VALID', 'INVALID')),
+  validation_error   text,                         -- motivo da reprovação
+  comment_body       text,                         -- texto final do template, com marcador oculto
+  prompt_version     text,
+  model              text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  CHECK (kind = 'missing_info' OR specialist IS NOT NULL),
+  CHECK (validation_status = 'VALID' OR validation_error IS NOT NULL),
+  CHECK (validation_status = 'INVALID' OR comment_body IS NOT NULL),
+  CHECK (answer IS NULL OR specialist = 'dominio')  -- campos obrigatórios da proposta: validador (Pydantic)
+);
+
+CREATE TABLE publisher.publications (
+  id                  bigserial PRIMARY KEY,
+  repository          text NOT NULL,
+  issue_number        int  NOT NULL,
+  revision            int  NOT NULL,              -- attempt que gerou a proposta
+  proposal_id         bigint NOT NULL,            -- triage.proposals.id
+  origin_event_id     text NOT NULL,              -- vai no marcador oculto do comentário
+  kind                text NOT NULL CHECK (kind IN ('triage', 'missing_info')),
+  state               text NOT NULL CHECK (state IN ('PENDING', 'PUBLISHED', 'FAILED')),
+  tries               smallint NOT NULL DEFAULT 0 CHECK (tries BETWEEN 0 AND 3),
+  failure_kind        text CHECK (failure_kind IN ('retries_exhausted', 'permanent')),
+  last_error          text,
+  github_comment_id   bigint,
+  github_comment_url  text,
+  published_at        timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (repository, issue_number, revision),    -- chave de deduplicação da publicação
+  CHECK (state <> 'PUBLISHED' OR (github_comment_id IS NOT NULL AND github_comment_url IS NOT NULL)),
+  CHECK (state <> 'FAILED' OR failure_kind IS NOT NULL)
+);
+```
+
 ## Atividades
 
 ### Etapa 1 — Fundação do serviço HTTP
@@ -376,7 +479,7 @@ Requisitos: RNF01, RNF02, RNF16. Depende de: Etapas 7, 8 e 9.
 
 ### Etapa 11 — Consulta do resultado (RF27)
 Requisitos: RF27, RNF07, RNF16. Depende de: Etapas 2, 5 e 6, e das migrações de `triage` e `publisher` (plano do issue-triage, Etapa 13, inversão do compose). Pré-condição: decisões D14 a D16 validadas.
-- [ ] Criar `tests/fixtures/sql/triage_publisher_stub.sql` (D15) e aplicá-lo antes das migrações em `tests/conftest.py`, mantendo os testes existentes verdes.
+- [ ] Criar `tests/fixtures/sql/triage_publisher_stub.sql` (D15) copiando o SQL da seção "Tabelas de `triage` e `publisher` lidas pela view", sem alterar nada e aplicá-lo antes das migrações em `tests/conftest.py`, mantendo os testes existentes verdes.
 - [ ] Criar `migrations/0002_issue_presentation.sql` com a view de "Modelo de dados", sem escrever em nenhuma tabela de `triage` nem de `publisher` (RNF07).
 - [ ] Testes de integração da view: issue aceita sem caso (`ACCEPTED`, `awaiting_analysis`); caso em `ANALYZING`; `READY_TO_PUBLISH` com proposta válida e publicação `PUBLISHED` (URL e data); falha de publicação (`FAILED` com `revision = current_attempt`) vira `NEEDS_REVIEW (technical_failure)` e, com `revision` antiga, não vira (D16); `NEEDS_REVIEW (insufficient_content)` sem proposta; `MAX_RETRIES_REACHED`; só a proposta `VALID` mais recente aparece; repetição de `issue.created` não duplica linha.
 - [ ] `GET /issues/{owner}/{repo}/{number}` em `api/`, com leitura em `adapters/` pelo pool existente e modelo Pydantic camelCase, conforme "Contratos > Consulta" (D14): `404 not_found`, `422` e `503 unavailable` com a espera de `CONNECTION_TIMEOUT_S`.
