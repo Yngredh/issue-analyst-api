@@ -187,7 +187,7 @@ def test_same_event_id_with_different_body_keeps_first_and_logs_mismatch(
         {
             "event": "duplicate_mismatch",
             "log_level": "warning",
-            "eventId": event_id,
+            "event_id": event_id,
             "storedBodyHash": hashlib.sha256(first_body).hexdigest(),
             "receivedBodyHash": hashlib.sha256(second_body).hexdigest(),
         }

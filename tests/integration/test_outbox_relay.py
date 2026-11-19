@@ -161,7 +161,7 @@ async def test_each_published_message_is_logged_with_event_id_in_context(
         for entry in logs
         if entry["event"] == "relay_message_published" and entry["dedupKey"] in keys
     ]
-    assert [(entry["eventId"], entry["dedupKey"]) for entry in published] == [
+    assert [(entry["event_id"], entry["dedupKey"]) for entry in published] == [
         (key.removesuffix(":1"), key) for key in keys
     ]
     assert all(entry["topic"] == ANALYSIS_QUEUE for entry in published)

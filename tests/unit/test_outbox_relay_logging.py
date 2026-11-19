@@ -1,7 +1,7 @@
 """Logs do relay da outbox (RNF14): falha de conexão, retomada e nenhum segredo no log.
 
 Broker e banco são simulados: o relay real roda com `_connect` e `publish_pending` roteirizados.
-A publicação com `eventId` no contexto é coberta em `tests/integration/test_outbox_relay.py`.
+A publicação com `event_id` no contexto é coberta em `tests/integration/test_outbox_relay.py`.
 """
 
 import asyncio

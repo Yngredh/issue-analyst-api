@@ -1,4 +1,4 @@
-"""Log de decisão do webhook (RNF14): um log por resposta, `eventId` no contexto e nenhum dado
+"""Log de decisão do webhook (RNF14): um log por resposta, `event_id` no contexto e nenhum dado
 sensível."""
 
 import hashlib
@@ -122,7 +122,7 @@ def test_accepted_logs_one_decision_with_event_id(client: TestClient) -> None:
         {
             "event": "webhook_response",
             "log_level": "info",
-            "eventId": EVENT_ID,
+            "event_id": EVENT_ID,
             "httpStatus": 202,
             "decision": "accepted",
             "reason": None,
@@ -144,7 +144,7 @@ def test_accepted_edit_logs_the_same_accepted_decision(client: TestClient) -> No
         {
             "event": "webhook_response",
             "log_level": "info",
-            "eventId": EVENT_ID,
+            "event_id": EVENT_ID,
             "httpStatus": 202,
             "decision": "accepted",
             "reason": None,
@@ -169,7 +169,7 @@ def test_duplicate_logs_decision_and_reason(
         {
             "event": "webhook_response",
             "log_level": "info",
-            "eventId": EVENT_ID,
+            "event_id": EVENT_ID,
             "httpStatus": 200,
             "decision": "duplicate",
             "reason": reason.value,
@@ -197,7 +197,7 @@ def test_ignored_logs_decision_and_reason(
         {
             "event": "webhook_response",
             "log_level": "info",
-            "eventId": EVENT_ID,
+            "event_id": EVENT_ID,
             "httpStatus": 200,
             "decision": "ignored",
             "reason": reason,
@@ -213,7 +213,7 @@ def test_validation_rejection_logs_code_and_field_names(client: TestClient) -> N
         {
             "event": "webhook_response",
             "log_level": "warning",
-            "eventId": EVENT_ID,
+            "event_id": EVENT_ID,
             "httpStatus": 400,
             "decision": "rejected",
             "reason": "missing_fields",
@@ -228,7 +228,7 @@ def test_missing_event_id_rejection_has_no_event_id(client: TestClient) -> None:
     assert status == 400
     [entry] = _responses(logs)
     assert (entry["decision"], entry["reason"]) == ("rejected", "missing_event_id")
-    assert "eventId" not in entry
+    assert "event_id" not in entry
 
 
 @pytest.mark.parametrize(
@@ -257,7 +257,7 @@ def test_invalid_signature_does_not_bind_event_id(client: TestClient) -> None:
     _, logs = _post_and_capture(client, _body(), signature=None)
 
     [entry] = _responses(logs)
-    assert "eventId" not in entry
+    assert "event_id" not in entry
 
 
 def test_payload_too_large_logs_rejection() -> None:
@@ -285,7 +285,7 @@ def test_database_unavailable_logs_rejection(
 
     assert status == 503
     [entry] = _responses(logs)
-    assert (entry["eventId"], entry["httpStatus"], entry["decision"], entry["reason"]) == (
+    assert (entry["event_id"], entry["httpStatus"], entry["decision"], entry["reason"]) == (
         EVENT_ID,
         503,
         "rejected",
@@ -294,11 +294,11 @@ def test_database_unavailable_logs_rejection(
 
 
 def test_event_id_is_bound_for_logs_inside_the_request(client: TestClient) -> None:
-    # `occurred_at_fallback` é registrado durante a normalização e recebe o `eventId` do contexto.
+    # `occurred_at_fallback` é registrado durante a normalização e recebe o `event_id` do contexto.
     _, logs = _post_and_capture(client, _body(created_at="ontem"))
 
     fallback = [entry for entry in logs if entry["event"] == "occurred_at_fallback"]
-    assert [entry["eventId"] for entry in fallback] == [EVENT_ID]
+    assert [entry["event_id"] for entry in fallback] == [EVENT_ID]
 
 
 def test_event_id_does_not_leak_between_requests(client: TestClient) -> None:
@@ -306,7 +306,7 @@ def test_event_id_does_not_leak_between_requests(client: TestClient) -> None:
     _, logs = _post_and_capture(client, _body(), delivery_id=None)
 
     [entry] = _responses(logs)
-    assert "eventId" not in entry
+    assert "event_id" not in entry
 
 
 def test_logs_never_contain_secret_raw_body_title_or_description(

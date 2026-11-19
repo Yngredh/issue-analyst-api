@@ -25,8 +25,8 @@ from issue_analyst_api.domain.signature import is_valid_signature
 
 router = APIRouter()
 
-# Chave do `eventId` no contexto do structlog (id de correlação da entrega).
-EVENT_ID_KEY = "eventId"
+# Chave do `event_id` no contexto do structlog (id de correlação da entrega).
+EVENT_ID_KEY = "event_id"
 
 
 class PayloadTooLargeError(Exception):
@@ -73,7 +73,7 @@ async def receive_github_webhook(request: Request) -> Response:
     banco fora → `503`.
 
     Cada resposta gera um único log `webhook_response` com o código HTTP, a decisão e o motivo.
-    O `eventId` fica no contexto do structlog durante a requisição e sai dele no fim.
+    O `event_id` fica no contexto do structlog durante a requisição e sai dele no fim.
     """
     try:
         outcome = await _process(request)
@@ -116,7 +116,7 @@ async def _process(request: Request) -> _Outcome:
     if not is_valid_signature(secret, body, request.headers.get("X-Hub-Signature-256")):
         return _rejected(401, "invalid_signature")
 
-    # Só depois da assinatura conferida: o `eventId` não vem de quem não tem o segredo.
+    # Só depois da assinatura conferida: o `event_id` do log não vem de quem não tem o segredo.
     delivery_id = request.headers.get("X-GitHub-Delivery")
     if delivery_id:
         structlog.contextvars.bind_contextvars(**{EVENT_ID_KEY: delivery_id})

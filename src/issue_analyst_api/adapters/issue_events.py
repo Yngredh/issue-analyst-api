@@ -156,7 +156,7 @@ async def _find_conflict(
             # Mesmo `eventId` com conteúdo diferente: ganha o primeiro (D13).
             structlog.get_logger().warning(
                 "duplicate_mismatch",
-                eventId=event.event_id,
+                event_id=event.event_id,
                 storedBodyHash=stored_body_hash,
                 receivedBodyHash=received_body_hash,
             )

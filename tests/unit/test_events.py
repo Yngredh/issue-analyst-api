@@ -297,7 +297,7 @@ def test_invalid_occurred_at_is_accepted_with_fallback(occurred_at: Any) -> None
         {
             "event": "occurred_at_fallback",
             "log_level": "warning",
-            "eventId": "evt-001",
+            "event_id": "evt-001",
             "reason": "invalid",
             "source": "created_at",
         }
