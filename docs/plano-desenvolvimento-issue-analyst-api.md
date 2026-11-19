@@ -485,7 +485,7 @@ Requisitos: RF27, RNF07, RNF16. Depende de: Etapas 2, 5 e 6, e das migrações d
 - [x] `GET /issues/{owner}/{repo}/{number}` em `api/`, com leitura em `adapters/` pelo pool existente e modelo Pydantic camelCase, conforme "Contratos > Consulta" (D14): `404 not_found`, `422` e `503 unavailable` com a espera de `CONNECTION_TIMEOUT_S`.
 - [x] Testes do endpoint: corpo exato em cada estado do item da view, 404, 422 e 503 com o banco parado; o `links.result` devolvido pelo `POST /webhooks/github` leva a um `200` com `status = "ACCEPTED"` para a mesma issue.
 - [x] README: como consultar o resultado (exemplo de `curl`), que a migração `0002` exige os schemas `triage` e `publisher` migrados (compose integrado do `issue-triage`, ou o stub) e o que é real ou simulado nos testes da consulta (RNF17).
-- [ ] (manual) No ambiente integrado: com o `issue-triage` parado, o `GET` mostra `ACCEPTED`; depois de retomar, mostra categoria, proposta e publicação; o caso sem informação suficiente mostra `NEEDS_REVIEW` com o motivo (evidência do RF27 na demonstração).
+- [x] (manual) No ambiente integrado: com o `issue-triage` parado, o `GET` mostra `ACCEPTED`; depois de retomar, mostra categoria, proposta e publicação; o caso sem informação suficiente mostra `NEEDS_REVIEW` com o motivo (evidência do RF27 na demonstração).
 
 ## Pontos em aberto
 
