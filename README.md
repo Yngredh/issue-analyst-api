@@ -107,6 +107,14 @@ aparece como `NEEDS_REVIEW` com `technical_failure`. Issue sem `issue.created` a
 {"error": "not_found"}`; número não inteiro positivo → `422`; banco indisponível → `503
 {"error": "unavailable"}`.
 
+## Logs
+
+Os logs saem em JSON, uma linha por evento. Além do `event` (identificador estável), cada linha traz `module` e `func_name` (de onde o log saiu), `message` (texto fixo em português, em `src/issue_analyst_api/log_messages.py`) e, quando há, o `event_id` de correlação, o mesmo nos três serviços. Exemplo:
+
+```json
+{"service": "issue-analyst-api", "event_id": "evt-001", "outboxId": 12, "topic": "analysis", "dedupKey": "evt-001:1", "event": "relay_message_published", "level": "info", "timestamp": "2026-11-19T11:29:00Z", "module": "outbox_relay", "func_name": "publish_pending", "message": "Mensagem enviada para a fila de análise"}
+```
+
 ## Testes
 
 ```bash
