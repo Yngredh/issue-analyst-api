@@ -7,7 +7,7 @@ relay lê as linhas pendentes em ordem de `id`, publica cada uma com publisher c
 entre publicar e marcar, a transação é desfeita e a linha é publicada de novo na próxima volta
 (entrega at-least-once; o `issue-triage` descarta repetições).
 
-Logs (RNF14): cada mensagem publicada (com o `eventId` no contexto do structlog), falha de
+Logs (RNF14): cada mensagem publicada (com o `event_id` no contexto do structlog), falha de
 conexão com o broker ou o banco e a retomada depois da falha. Erros são registrados só pelo tipo
 da exceção, para que URLs com credenciais nunca vão para o log.
 """
@@ -189,13 +189,13 @@ class OutboxRelay:
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                     message_id=dedup_key,
                 )
-                with structlog.contextvars.bound_contextvars(eventId=event_id):
+                with structlog.contextvars.bound_contextvars(event_id=event_id):
                     # Com publisher confirms, o `publish` só retorna depois do ack do broker.
                     await exchange.publish(message, routing_key=topic)
             await self._mark_published(conn, [row[0] for row in rows])
         # Log só depois do commit: a mensagem foi confirmada pelo broker e marcada na outbox.
         for outbox_id, event_id, topic, dedup_key, _ in rows:
-            with structlog.contextvars.bound_contextvars(eventId=event_id):
+            with structlog.contextvars.bound_contextvars(event_id=event_id):
                 self._log.info(
                     "relay_message_published",
                     outboxId=outbox_id,

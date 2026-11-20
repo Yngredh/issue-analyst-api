@@ -180,7 +180,7 @@ def normalize_issue_event(
 
     if fallback is not None:
         structlog.get_logger().warning(
-            "occurred_at_fallback", eventId=delivery_id, reason=fallback, source=occurred_source
+            "occurred_at_fallback", event_id=delivery_id, reason=fallback, source=occurred_source
         )
 
     return NormalizedIssueEvent(
